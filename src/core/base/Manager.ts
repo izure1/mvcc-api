@@ -5,23 +5,22 @@ import type { MVCCTransaction } from './Transaction'
 export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
   version: number
   readonly strategy: S
-  protected readonly dataVersions: Map<string, number>
+  protected readonly versionIndex: Map<string, { version: number, exists: boolean }[]>
   protected readonly activeTransactions: Set<MVCCTransaction<T, S, this>>
-  readonly deletedCache: Map<string, DeleteEntry<T>>
+  protected readonly deletedCache: Map<string, DeleteEntry<T>[]>
 
   constructor(strategy: S) {
     this.strategy = strategy
     this.version = 0
-    this.dataVersions = new Map()
     this.activeTransactions = new Set()
     this.deletedCache = new Map()
+    this.versionIndex = new Map()
   }
 
   abstract createTransaction(): MVCCTransaction<T, S, this>
-  abstract _diskWrite(key: string, value: T): Deferred<void>
-  abstract _diskRead(key: string): Deferred<T>
-  abstract _diskDelete(key: string): Deferred<void>
-  abstract _diskExists(key: string): Deferred<boolean>
+  abstract _diskWrite(key: string, value: T, version: number): Deferred<void>
+  abstract _diskRead(key: string, shapshotVersion: number): Deferred<T | null>
+  abstract _diskDelete(key: string, snapshotVersion: number): Deferred<void>
   abstract _commit(tx: MVCCTransaction<T, S, this>): Deferred<void>
 
   _removeTransaction(tx: MVCCTransaction<T, S, this>): void {
@@ -35,10 +34,36 @@ export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
     for (const tx of this.activeTransactions) {
       minVersion = Math.min(minVersion, tx.snapshotVersion)
     }
-    // minVersion 이전에 삭제된 항목들은 안전하게 제거 가능
-    for (const [key, entry] of this.deletedCache.entries()) {
-      if (entry.deletedAtVersion < minVersion) {
+    // 버전 메타데이터 정리
+    for (const [key, versions] of this.versionIndex.entries()) {
+      const toKeep = []
+      let keptOldVersion = false
+      let i = versions.length
+      while (i--) {
+        const v = versions[i]
+        if (v.version > minVersion) {
+          toKeep.unshift(v)
+        }
+        else if (!keptOldVersion) {
+          toKeep.unshift(v)
+          keptOldVersion = true
+        }
+      }
+      if (toKeep.length === 0) {
+        this.versionIndex.delete(key)
+      }
+      else {
+        this.versionIndex.set(key, toKeep)
+      }
+    }
+    // 삭제 캐시 정리
+    for (const [key, versions] of this.deletedCache.entries()) {
+      const filtered = versions.filter(v => v.deletedAtVersion >= minVersion)
+      if (filtered.length === 0) {
         this.deletedCache.delete(key)
+      }
+      else {
+        this.deletedCache.set(key, filtered)
       }
     }
   }

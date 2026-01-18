@@ -8,14 +8,12 @@ export abstract class MVCCTransaction<T, S extends MVCCStrategy<T>, M extends MV
   readonly snapshotVersion: number
   readonly writeBuffer: Map<string, T>
   readonly deleteBuffer: Set<string>
-  readonly readSet: Set<string>
 
   constructor(manager: M, snapshotVersion: number) {
     this.manager = manager
     this.snapshotVersion = snapshotVersion
     this.writeBuffer = new Map()
     this.deleteBuffer = new Set()
-    this.readSet = new Set()
     this.committed = false
   }
 
@@ -42,12 +40,11 @@ export abstract class MVCCTransaction<T, S extends MVCCStrategy<T>, M extends MV
   rollback(): this {
     this.writeBuffer.clear()
     this.deleteBuffer.clear()
-    this.readSet.clear()
     this.committed = true
     this.manager._removeTransaction(this)
     return this
   }
 
-  abstract read(key: string): Deferred<T> | null
+  abstract read(key: string): Deferred<T | null>
   abstract commit(): Deferred<this>
 }

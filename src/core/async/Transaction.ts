@@ -1,13 +1,13 @@
-import type { SyncMVCCStrategy } from './Strategy'
-import type { SyncMVCCManager } from './Manager'
+import type { AsyncMVCCStrategy } from './Strategy'
+import type { AsyncMVCCManager } from './Manager'
 import { MVCCTransaction } from '../base'
 
-export class SyncMVCCTransaction<
+export class AsyncMVCCTransaction<
   T,
-  S extends SyncMVCCStrategy<T>,
-  M extends SyncMVCCManager<T, S>
+  S extends AsyncMVCCStrategy<T>,
+  M extends AsyncMVCCManager<T, S>
 > extends MVCCTransaction<T, S, M> {
-  read(key: string): T | null {
+  async read(key: string): Promise<T | null> {
     if (this.committed) throw new Error('Transaction already committed')
     // 1. 먼저 로컬 writeBuffer 확인
     if (this.writeBuffer.has(key)) {
@@ -21,11 +21,13 @@ export class SyncMVCCTransaction<
     return this.manager._diskRead(key, this.snapshotVersion)
   }
 
-  commit(): this {
-    if (this.committed) throw new Error('Transaction already committed')
-    this.manager._commit(this)
-    this.committed = true
-    this.manager._removeTransaction(this)
-    return this
+  async commit(): Promise<this> {
+    return this.manager.writeLock(async () => {
+      if (this.committed) throw new Error('Transaction already committed')
+      await this.manager._commit(this)
+      this.committed = true
+      this.manager._removeTransaction(this)
+      return this
+    })
   }
 }

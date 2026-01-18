@@ -1,29 +1,43 @@
-import type { SyncMVCCStrategy } from './Strategy'
+import type { AsyncMVCCStrategy } from './Strategy'
+import { Ryoiki } from 'ryoiki'
 import { MVCCManager } from '../base'
-import { SyncMVCCTransaction } from './Transaction'
+import { AsyncMVCCTransaction } from './Transaction'
 
-export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManager<T, S> {
+export class AsyncMVCCManager<T, S extends AsyncMVCCStrategy<T>> extends MVCCManager<T, S> {
+  readonly lock: Ryoiki
+
   constructor(strategy: S) {
     super(strategy)
+    this.lock = new Ryoiki()
   }
 
-  createTransaction(): SyncMVCCTransaction<T, S, this> {
-    const tx = new SyncMVCCTransaction(this, this.version) as unknown as SyncMVCCTransaction<T, S, this>
+  createTransaction(): AsyncMVCCTransaction<T, S, this> {
+    const tx = new AsyncMVCCTransaction(this, this.version) as unknown as AsyncMVCCTransaction<T, S, this>
     this.activeTransactions.add(tx)
     return tx
   }
 
-  _diskWrite(key: string, value: T, version: number): void {
+  async writeLock<R>(fn: () => Promise<R>): Promise<R> {
+    let lockId: string
+    return this.lock.writeLock(async (_lockId) => {
+      lockId = _lockId
+      return fn()
+    }).finally(() => {
+      this.lock.writeUnlock(lockId)
+    })
+  }
+
+  async _diskWrite(key: string, value: T, version: number): Promise<void> {
     // 덮어쓰기 전 백업 (Copy-on-Write)
-    if (this.strategy.exists(key)) {
-      const oldValue = this.strategy.read(key)
+    if (await this.strategy.exists(key)) {
+      const oldValue = await this.strategy.read(key)
       if (!this.deletedCache.has(key)) {
         this.deletedCache.set(key, [])
       }
       this.deletedCache.get(key)!.push({ value: oldValue, deletedAtVersion: version })
     }
     // 실제 데이터는 즉시 파일에 저장
-    this.strategy.write(key, value)
+    await this.strategy.write(key, value)
     // 버전 메타데이터 기록
     if (!this.versionIndex.has(key)) {
       this.versionIndex.set(key, [])
@@ -31,10 +45,10 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     this.versionIndex.get(key)!.push({ version, exists: true })
   }
 
-  _diskRead(key: string, snapshotVersion: number): T | null {
+  async _diskRead(key: string, snapshotVersion: number): Promise<T | null> {
     // 0. 영속성 지원: 버전 인덱스가 없고 디스크에 파일이 존재하면(재시작 등) 읽기 허용
     if (!this.versionIndex.has(key) && !this.deletedCache.has(key)) {
-      if (this.strategy.exists(key)) {
+      if (await this.strategy.exists(key)) {
         return this.strategy.read(key)
       }
       return null
@@ -66,16 +80,16 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     return null
   }
 
-  _diskDelete(key: string, snapshotVersion: number): void {
+  async _diskDelete(key: string, snapshotVersion: number): Promise<void> {
     // 1. 디스크에서 데이터 읽어서 캐시에 보관
-    if (this.strategy.exists(key)) {
-      const data = this.strategy.read(key)
+    if (await this.strategy.exists(key)) {
+      const data = await this.strategy.read(key)
       if (!this.deletedCache.has(key)) {
         this.deletedCache.set(key, [])
       }
       this.deletedCache.get(key)!.push({ deletedAtVersion: snapshotVersion, value: data })
       // 2. 디스크에서 즉시 삭제
-      this.strategy.delete(key)
+      await this.strategy.delete(key)
     }
 
     // 3. 버전 메타데이터에 삭제 기록
@@ -85,7 +99,7 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     this.versionIndex.get(key)!.push({ version: snapshotVersion, exists: false })
   }
 
-  _commit(tx: SyncMVCCTransaction<T, S, this>): void {
+  async _commit(tx: AsyncMVCCTransaction<T, S, this>): Promise<void> {
     const isReadOnly = tx.writeBuffer.size === 0 && tx.deleteBuffer.size === 0
     // 충돌 감지 1: 스냅샷 버전보다 현재 버전이 높으면 다른 트랜잭션이 커밋됨
     if (!isReadOnly && this.version > tx.snapshotVersion) {
@@ -108,11 +122,11 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     this.version++
     // 삭제 먼저 적용
     for (const key of tx.deleteBuffer) {
-      this._diskDelete(key, this.version)
+      await this._diskDelete(key, this.version)
     }
     // 쓰기 적용
     for (const [key, value] of tx.writeBuffer) {
-      this._diskWrite(key, value, this.version)
+      await this._diskWrite(key, value, this.version)
     }
   }
 }
