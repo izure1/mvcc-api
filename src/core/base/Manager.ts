@@ -2,6 +2,13 @@ import type { Deferred, DeleteEntry } from '../../types'
 import type { MVCCStrategy } from './Strategy'
 import type { MVCCTransaction } from './Transaction'
 
+/**
+ * MVCC Manager abstract class.
+ * Orchestrates transactions, manages the version index, and handles garbage collection.
+ * It is responsible for maintaining the consistency of the data and version history.
+ * @template T The type of data stored.
+ * @template S The strategy type used for persistence.
+ */
 export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
   version: number
   readonly strategy: S
@@ -17,10 +24,44 @@ export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
     this.versionIndex = new Map()
   }
 
+  /**
+   * Creates a new transaction with the current version.
+   * @returns A new accessible transaction instance.
+   */
   abstract createTransaction(): MVCCTransaction<T, S, this>
+
+  /**
+   * Writes data to the persistent storage and indexes the new version.
+   * @internal This method is for internal use only and should not be called directly.
+   * @param key The key to write.
+   * @param value The value to write.
+   * @param version The version number for this write.
+   */
   abstract _diskWrite(key: string, value: T, version: number): Deferred<void>
+
+  /**
+   * Reads data from the persistent storage for a specific snapshot version.
+   * @internal This method is for internal use only and should not be called directly.
+   * @param key The key to read.
+   * @param shapshotVersion The transaction's snapshot version.
+   * @returns The data visible to the snapshot version, or null.
+   */
   abstract _diskRead(key: string, shapshotVersion: number): Deferred<T | null>
+
+  /**
+   * Deletes data from the persistent storage (records a deletion version).
+   * @internal This method is for internal use only and should not be called directly.
+   * @param key The key to delete.
+   * @param snapshotVersion The version at which the deletion occurs.
+   */
   abstract _diskDelete(key: string, snapshotVersion: number): Deferred<void>
+
+  /**
+   * Commits a transaction.
+   * Validates conflicts and applies the transaction's changes.
+   * @internal This method is for internal use only and should not be called directly.
+   * @param tx The transaction to commit.
+   */
   abstract _commit(tx: MVCCTransaction<T, S, this>): Deferred<void>
 
   _removeTransaction(tx: MVCCTransaction<T, S, this>): void {
