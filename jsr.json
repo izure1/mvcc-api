@@ -1,6 +1,22 @@
 {
   "name": "@izure/mvcc-api",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "description": "Multiversion Concurrency Control (MVCC) API for TypeScript.",
+  "author": "izure <admin@izure.org>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/izure1/mvcc-api.git"
+  },
+  "imports": {
+    "ryoiki": "jsr:@izure/ryoiki@^1.2.0"
+  },
+  "publish": {
+    "include": [
+      "LICENSE",
+      "README.md",
+      "src/**/*.ts"
+    ]
+  }
 }
