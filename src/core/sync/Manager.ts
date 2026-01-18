@@ -36,13 +36,24 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
   }
 
   _commit(tx: SyncMVCCTransaction<T, S, this>): void {
-    // 충돌 감지: 트랜잭션이 읽은 파일이 다른 트랜잭션에 의해 수정되었는지 확인
-    for (const key of tx.readSet) {
-      const currentVersion = this.dataVersions.get(key) || -1
-      if (currentVersion > tx.snapshotVersion) {
-        throw new Error(`Commit conflict: file '${key}' was modified by another transaction`);
+    const isReadOnly = tx.writeBuffer.size === 0 && tx.deleteBuffer.size === 0
+    // 충돌 감지 1: 스냅샷 버전보다 현재 버전이 높으면 다른 트랜잭션이 커밋됨
+    if (!isReadOnly && this.version > tx.snapshotVersion) {
+      // 읽은 파일이나 쓰려는 파일이 수정되었는지 확인
+      const affectedKeys = new Set([
+        ...tx.readSet,
+        ...tx.writeBuffer.keys(),
+        ...tx.deleteBuffer
+      ])
+      for (const key of affectedKeys) {
+        const currentVersion = this.dataVersions.get(key) || -1
+        if (currentVersion > tx.snapshotVersion) {
+          throw new Error(`Commit conflict: file '${key}' was modified by another transaction`)
+        }
       }
     }
+    // 버전 증가
+    this.version++
     // 쓰기 적용
     for (const [key, value] of tx.writeBuffer) {
       this._diskWrite(key, value)
@@ -51,8 +62,6 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     for (const key of tx.deleteBuffer) {
       this._diskDelete(key)
     }
-    // 버전 증가
-    this.version++
     // 삭제 캐시 정리 (더 이상 참조하는 트랜잭션이 없는 경우)
     this._cleanupDeletedCache()
   }

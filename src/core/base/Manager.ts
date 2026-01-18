@@ -35,7 +35,6 @@ export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
     for (const tx of this.activeTransactions) {
       minVersion = Math.min(minVersion, tx.snapshotVersion)
     }
-
     // minVersion 이전에 삭제된 항목들은 안전하게 제거 가능
     for (const [key, entry] of this.deletedCache.entries()) {
       if (entry.deletedAtVersion < minVersion) {

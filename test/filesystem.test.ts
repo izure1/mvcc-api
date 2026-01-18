@@ -18,9 +18,9 @@ describe('FileSystem MVCC', () => {
 
   beforeEach(() => {
     if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      fs.rmSync(tmpDir, { recursive: true, force: true })
     }
-    fs.mkdirSync(tmpDir);
+    fs.mkdirSync(tmpDir)
   })
 
   const getPath = (filename: string) => path.join(tmpDir, filename)
