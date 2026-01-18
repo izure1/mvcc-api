@@ -1,7 +1,7 @@
 {
   "name": "mvcc-api",
   "version": "0.0.1",
-  "description": "",
+  "description": "Multiversion Concurrency Control (MVCC) API for TypeScript",
   "license": "MIT",
   "author": "izure <admin@izure.org>",
   "main": "./dist/cjs/index.js",
@@ -22,7 +22,10 @@
     "build": "node build/index.mjs && tsc"
   },
   "keywords": [
-    "mvcc"
+    "mvcc",
+    "concurrency",
+    "database",
+    "transaction"
   ],
   "repository": {
     "type": "git",
