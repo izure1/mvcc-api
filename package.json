@@ -1,6 +1,6 @@
 {
   "name": "mvcc-api",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Multiversion Concurrency Control (MVCC) API for TypeScript",
   "license": "MIT",
   "author": "izure <admin@izure.org>",
