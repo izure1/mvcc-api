@@ -27,7 +27,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   const getPath = (filename: string) => path.join(tmpDir, filename)
 
   test('Scenario 1: Long Running Reader (Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
     const historyFile = getPath('history.txt')
 
     // Initial State
@@ -52,7 +52,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 2: Massive Concurrent Writes (Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
     const counterFile = getPath('counter.txt')
 
     await (await manager.createTransaction().create(counterFile, '0').commit())
@@ -74,7 +74,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 3: Consistency (Money Transfer Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
     const accA = getPath('A.txt')
     const accB = getPath('B.txt')
 
@@ -118,12 +118,12 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const tempFile = getPath('atomicity.txt')
 
     // Manager 1
-    const manager1 = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager1 = new AsyncMVCCManager(new AsyncFileStrategy())
     const tx1 = manager1.createTransaction()
     tx1.create(tempFile, 'In Progress')
 
     // Manager 2
-    const manager2 = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager2 = new AsyncMVCCManager(new AsyncFileStrategy())
     const tx2 = manager2.createTransaction()
 
     // Should NOT see uncommitted data
@@ -139,13 +139,13 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     expect(await fsPromises.readFile(tempFile, 'utf-8')).toBe('In Progress')
 
     // Manager 3
-    const manager3 = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager3 = new AsyncMVCCManager(new AsyncFileStrategy())
     const tx3 = manager3.createTransaction()
     expect(await tx3.read(tempFile)).toBe('In Progress')
   })
 
   test('Scenario 5: Read Your Own Writes (Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
     const file = getPath('own_write.txt')
 
     await (await manager.createTransaction().create(file, 'Initial').commit())
@@ -170,7 +170,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 6: Delete-Create Cycle (Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
     const cycleFile = getPath('cycle.txt')
 
     await (await manager.createTransaction().create(cycleFile, 'V1').commit())
@@ -192,7 +192,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 7: Rollback Integrity (Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
     const stableFile = getPath('stable.txt')
     const dirtyFile = getPath('dirty.txt')
 
@@ -213,7 +213,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 8: Repeated Read (Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
     const file = getPath('repeat.txt')
 
     await (await manager.createTransaction().create(file, 'A').commit())
@@ -232,7 +232,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     expect(await observer.read(file)).toBe('A')
   })
 
-  class TestAsyncMVCCManager extends AsyncMVCCManager<string, AsyncFileStrategy> {
+  class TestAsyncMVCCManager extends AsyncMVCCManager<AsyncFileStrategy, string, string> {
     getDeletedCacheSize(): number {
       return this.deletedCache.size
     }
@@ -259,7 +259,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 10: Non-Conflicting Parallel Writes (Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
 
     // Setup: 100 Transactions writing to 100 DIFFERENT files.
     // They should ALL succeed because there is no key conflict.
@@ -282,7 +282,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 11: Mixed Conflict Concurrency (Async)', async () => {
-    const manager = new AsyncMVCCManager<string, AsyncFileStrategy>(new AsyncFileStrategy())
+    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
     const fileA = getPath('mixed_A.txt')
     const fileB = getPath('mixed_B.txt')
 

@@ -2,18 +2,18 @@ import type { SyncMVCCStrategy } from './Strategy'
 import { MVCCManager } from '../base'
 import { SyncMVCCTransaction } from './Transaction'
 
-export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManager<T, S> {
+export class SyncMVCCManager<S extends SyncMVCCStrategy<K, T>, K, T> extends MVCCManager<S, K, T> {
   constructor(strategy: S) {
     super(strategy)
   }
 
-  createTransaction(): SyncMVCCTransaction<T, S, this> {
-    const tx = new SyncMVCCTransaction(this, this.version) as unknown as SyncMVCCTransaction<T, S, this>
+  createTransaction(): SyncMVCCTransaction<S, K, T, this> {
+    const tx = new SyncMVCCTransaction(this, this.version) as unknown as SyncMVCCTransaction<S, K, T, this>
     this.activeTransactions.add(tx)
     return tx
   }
 
-  _diskWrite(key: string, value: T, version: number): void {
+  _diskWrite(key: K, value: T, version: number): void {
     // 덮어쓰기 전 백업 (Copy-on-Write)
     if (this.strategy.exists(key)) {
       const oldValue = this.strategy.read(key)
@@ -31,7 +31,7 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     this.versionIndex.get(key)!.push({ version, exists: true })
   }
 
-  _diskRead(key: string, snapshotVersion: number): T | null {
+  _diskRead(key: K, snapshotVersion: number): T | null {
     // 0. 영속성 지원: 버전 인덱스가 없고 디스크에 파일이 존재하면(재시작 등) 읽기 허용
     if (!this.versionIndex.has(key) && !this.deletedCache.has(key)) {
       if (this.strategy.exists(key)) {
@@ -66,7 +66,7 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     return null
   }
 
-  _diskDelete(key: string, snapshotVersion: number): void {
+  _diskDelete(key: K, snapshotVersion: number): void {
     // 1. 디스크에서 데이터 읽어서 캐시에 보관
     if (this.strategy.exists(key)) {
       const data = this.strategy.read(key)
@@ -85,7 +85,7 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     this.versionIndex.get(key)!.push({ version: snapshotVersion, exists: false })
   }
 
-  _commit(tx: SyncMVCCTransaction<T, S, this>): void {
+  _commit(tx: SyncMVCCTransaction<S, K, T, this>): void {
     const isReadOnly = tx.writeBuffer.size === 0 && tx.deleteBuffer.size === 0
     // 충돌 감지 1: 스냅샷 버전보다 현재 버전이 높으면 다른 트랜잭션이 커밋됨
     if (!isReadOnly && this.version > tx.snapshotVersion) {

@@ -3,11 +3,12 @@ import type { SyncMVCCManager } from './Manager'
 import { MVCCTransaction } from '../base'
 
 export class SyncMVCCTransaction<
+  S extends SyncMVCCStrategy<K, T>,
+  K,
   T,
-  S extends SyncMVCCStrategy<T>,
-  M extends SyncMVCCManager<T, S>
-> extends MVCCTransaction<T, S, M> {
-  read(key: string): T | null {
+  M extends SyncMVCCManager<S, K, T>
+> extends MVCCTransaction<S, K, T, M> {
+  read(key: K): T | null {
     if (this.committed) throw new Error('Transaction already committed')
     // 1. 먼저 로컬 writeBuffer 확인
     if (this.writeBuffer.has(key)) {

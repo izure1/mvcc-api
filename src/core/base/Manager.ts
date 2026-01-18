@@ -6,15 +6,16 @@ import type { MVCCTransaction } from './Transaction'
  * MVCC Manager abstract class.
  * Orchestrates transactions, manages the version index, and handles garbage collection.
  * It is responsible for maintaining the consistency of the data and version history.
- * @template T The type of data stored.
  * @template S The strategy type used for persistence.
+ * @template K The type of key used for data storage (e.g., string).
+ * @template T The type of data stored (e.g., string, Buffer, object).
  */
-export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
+export abstract class MVCCManager<S extends MVCCStrategy<K, T>, K, T> {
   version: number
   readonly strategy: S
-  protected readonly versionIndex: Map<string, { version: number, exists: boolean }[]>
-  protected readonly activeTransactions: Set<MVCCTransaction<T, S, this>>
-  protected readonly deletedCache: Map<string, DeleteEntry<T>[]>
+  protected readonly versionIndex: Map<K, { version: number, exists: boolean }[]>
+  protected readonly activeTransactions: Set<MVCCTransaction<S, K, T, this>>
+  protected readonly deletedCache: Map<K, DeleteEntry<T>[]>
 
   constructor(strategy: S) {
     this.strategy = strategy
@@ -28,7 +29,7 @@ export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
    * Creates a new transaction with the current version.
    * @returns A new accessible transaction instance.
    */
-  abstract createTransaction(): MVCCTransaction<T, S, this>
+  abstract createTransaction(): MVCCTransaction<S, K, T, this>
 
   /**
    * Writes data to the persistent storage and indexes the new version.
@@ -37,7 +38,7 @@ export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
    * @param value The value to write.
    * @param version The version number for this write.
    */
-  abstract _diskWrite(key: string, value: T, version: number): Deferred<void>
+  abstract _diskWrite(key: K, value: T, version: number): Deferred<void>
 
   /**
    * Reads data from the persistent storage for a specific snapshot version.
@@ -46,7 +47,7 @@ export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
    * @param shapshotVersion The transaction's snapshot version.
    * @returns The data visible to the snapshot version, or null.
    */
-  abstract _diskRead(key: string, shapshotVersion: number): Deferred<T | null>
+  abstract _diskRead(key: K, shapshotVersion: number): Deferred<T | null>
 
   /**
    * Deletes data from the persistent storage (records a deletion version).
@@ -54,7 +55,7 @@ export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
    * @param key The key to delete.
    * @param snapshotVersion The version at which the deletion occurs.
    */
-  abstract _diskDelete(key: string, snapshotVersion: number): Deferred<void>
+  abstract _diskDelete(key: K, snapshotVersion: number): Deferred<void>
 
   /**
    * Commits a transaction.
@@ -62,9 +63,9 @@ export abstract class MVCCManager<T, S extends MVCCStrategy<T>> {
    * @internal This method is for internal use only and should not be called directly.
    * @param tx The transaction to commit.
    */
-  abstract _commit(tx: MVCCTransaction<T, S, this>): Deferred<void>
+  abstract _commit(tx: MVCCTransaction<S, K, T, this>): Deferred<void>
 
-  _removeTransaction(tx: MVCCTransaction<T, S, this>): void {
+  _removeTransaction(tx: MVCCTransaction<S, K, T, this>): void {
     this.activeTransactions.delete(tx)
     this._cleanupDeletedCache()
   }

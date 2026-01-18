@@ -3,11 +3,12 @@ import type { AsyncMVCCManager } from './Manager'
 import { MVCCTransaction } from '../base'
 
 export class AsyncMVCCTransaction<
+  S extends AsyncMVCCStrategy<K, T>,
+  K,
   T,
-  S extends AsyncMVCCStrategy<T>,
-  M extends AsyncMVCCManager<T, S>
-> extends MVCCTransaction<T, S, M> {
-  async read(key: string): Promise<T | null> {
+  M extends AsyncMVCCManager<S, K, T>
+> extends MVCCTransaction<S, K, T, M> {
+  async read(key: K): Promise<T | null> {
     if (this.committed) throw new Error('Transaction already committed')
     // 1. 먼저 로컬 writeBuffer 확인
     if (this.writeBuffer.has(key)) {

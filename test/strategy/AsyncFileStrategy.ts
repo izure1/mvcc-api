@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import { AsyncMVCCStrategy } from '../../src/core/async/Strategy'
 
-export class AsyncFileStrategy extends AsyncMVCCStrategy<string> {
+export class AsyncFileStrategy extends AsyncMVCCStrategy<string, string> {
   async read(key: string): Promise<string> {
     return fs.readFile(key, 'utf-8')
   }

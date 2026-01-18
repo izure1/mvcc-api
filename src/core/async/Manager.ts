@@ -3,7 +3,7 @@ import { Ryoiki } from 'ryoiki'
 import { MVCCManager } from '../base'
 import { AsyncMVCCTransaction } from './Transaction'
 
-export class AsyncMVCCManager<T, S extends AsyncMVCCStrategy<T>> extends MVCCManager<T, S> {
+export class AsyncMVCCManager<S extends AsyncMVCCStrategy<K, T>, K, T> extends MVCCManager<S, K, T> {
   readonly lock: Ryoiki
 
   constructor(strategy: S) {
@@ -11,8 +11,8 @@ export class AsyncMVCCManager<T, S extends AsyncMVCCStrategy<T>> extends MVCCMan
     this.lock = new Ryoiki()
   }
 
-  createTransaction(): AsyncMVCCTransaction<T, S, this> {
-    const tx = new AsyncMVCCTransaction(this, this.version) as unknown as AsyncMVCCTransaction<T, S, this>
+  createTransaction(): AsyncMVCCTransaction<S, K, T, this> {
+    const tx = new AsyncMVCCTransaction(this, this.version) as unknown as AsyncMVCCTransaction<S, K, T, this>
     this.activeTransactions.add(tx)
     return tx
   }
@@ -27,7 +27,7 @@ export class AsyncMVCCManager<T, S extends AsyncMVCCStrategy<T>> extends MVCCMan
     })
   }
 
-  async _diskWrite(key: string, value: T, version: number): Promise<void> {
+  async _diskWrite(key: K, value: T, version: number): Promise<void> {
     // 덮어쓰기 전 백업 (Copy-on-Write)
     if (await this.strategy.exists(key)) {
       const oldValue = await this.strategy.read(key)
@@ -45,7 +45,7 @@ export class AsyncMVCCManager<T, S extends AsyncMVCCStrategy<T>> extends MVCCMan
     this.versionIndex.get(key)!.push({ version, exists: true })
   }
 
-  async _diskRead(key: string, snapshotVersion: number): Promise<T | null> {
+  async _diskRead(key: K, snapshotVersion: number): Promise<T | null> {
     // 0. 영속성 지원: 버전 인덱스가 없고 디스크에 파일이 존재하면(재시작 등) 읽기 허용
     if (!this.versionIndex.has(key) && !this.deletedCache.has(key)) {
       if (await this.strategy.exists(key)) {
@@ -80,7 +80,7 @@ export class AsyncMVCCManager<T, S extends AsyncMVCCStrategy<T>> extends MVCCMan
     return null
   }
 
-  async _diskDelete(key: string, snapshotVersion: number): Promise<void> {
+  async _diskDelete(key: K, snapshotVersion: number): Promise<void> {
     // 1. 디스크에서 데이터 읽어서 캐시에 보관
     if (await this.strategy.exists(key)) {
       const data = await this.strategy.read(key)
@@ -99,7 +99,7 @@ export class AsyncMVCCManager<T, S extends AsyncMVCCStrategy<T>> extends MVCCMan
     this.versionIndex.get(key)!.push({ version: snapshotVersion, exists: false })
   }
 
-  async _commit(tx: AsyncMVCCTransaction<T, S, this>): Promise<void> {
+  async _commit(tx: AsyncMVCCTransaction<S, K, T, this>): Promise<void> {
     const isReadOnly = tx.writeBuffer.size === 0 && tx.deleteBuffer.size === 0
     // 충돌 감지 1: 스냅샷 버전보다 현재 버전이 높으면 다른 트랜잭션이 커밋됨
     if (!isReadOnly && this.version > tx.snapshotVersion) {

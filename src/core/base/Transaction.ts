@@ -6,16 +6,17 @@ import type { MVCCStrategy } from './Strategy'
  * MVCC Transaction abstract class.
  * Represents a logical unit of work that isolates changes until commit.
  * It manages its own write/delete buffers and enforces Snapshot Isolation.
- * @template T The type of data stored.
  * @template S The strategy type used by the manager.
+ * @template K The type of key used for data storage (e.g., string).
+ * @template T The type of data stored (e.g., string, Buffer, object).
  * @template M The manager type that created this transaction.
  */
-export abstract class MVCCTransaction<T, S extends MVCCStrategy<T>, M extends MVCCManager<T, S>> {
+export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T, M extends MVCCManager<S, K, T>> {
   protected readonly manager: M
   protected committed: boolean
   readonly snapshotVersion: number
-  readonly writeBuffer: Map<string, T>
-  readonly deleteBuffer: Set<string>
+  readonly writeBuffer: Map<K, T>
+  readonly deleteBuffer: Set<K>
 
   constructor(manager: M, snapshotVersion: number) {
     this.manager = manager
@@ -32,7 +33,7 @@ export abstract class MVCCTransaction<T, S extends MVCCStrategy<T>, M extends MV
    * @param value The value to store.
    * @returns The transaction instance for chaining.
    */
-  create(key: string, value: T): this {
+  create(key: K, value: T): this {
     if (this.committed) throw new Error('Transaction already committed')
     this.writeBuffer.set(key, value)
     return this
@@ -45,7 +46,7 @@ export abstract class MVCCTransaction<T, S extends MVCCStrategy<T>, M extends MV
    * @param value The value to store.
    * @returns The transaction instance for chaining.
    */
-  write(key: string, value: T): this {
+  write(key: K, value: T): this {
     if (this.committed) throw new Error('Transaction already committed')
     this.writeBuffer.set(key, value)
     this.deleteBuffer.delete(key)
@@ -57,7 +58,7 @@ export abstract class MVCCTransaction<T, S extends MVCCStrategy<T>, M extends MV
    * @param key The key to delete.
    * @returns The transaction instance for chaining.
    */
-  delete(key: string): this {
+  delete(key: K): this {
     if (this.committed) throw new Error('Transaction already committed')
     this.deleteBuffer.add(key)
     this.writeBuffer.delete(key)
@@ -82,7 +83,7 @@ export abstract class MVCCTransaction<T, S extends MVCCStrategy<T>, M extends MV
    * @param key The key to read.
    * @returns The value, or null if not found.
    */
-  abstract read(key: string): Deferred<T | null>
+  abstract read(key: K): Deferred<T | null>
 
   /**
    * Commits the transaction.

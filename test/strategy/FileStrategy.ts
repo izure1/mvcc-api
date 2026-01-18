@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { SyncMVCCStrategy } from '../../src'
 
-export class FileStrategy extends SyncMVCCStrategy<string> {
+export class FileStrategy extends SyncMVCCStrategy<string, string> {
   read(key: string): string {
     return fs.readFileSync(key, 'utf-8')
   }

@@ -26,7 +26,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
   const getPath = (filename: string) => path.join(tmpDir, filename)
 
   test('Scenario 1: Long Running Reader (Undo Log Depth)', () => {
-    const manager = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager = new SyncMVCCManager(new FileStrategy())
     const historyFile = getPath('history.txt')
 
     // Initial State
@@ -50,7 +50,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 2: Massive Concurrent Writes', () => {
-    const manager = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager = new SyncMVCCManager(new FileStrategy())
     const counterFile = getPath('counter.txt')
 
     manager.createTransaction().create(counterFile, '0').commit()
@@ -77,7 +77,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 3: Consistency (Money Transfer)', () => {
-    const manager = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager = new SyncMVCCManager(new FileStrategy())
     const accA = getPath('A.txt')
     const accB = getPath('B.txt')
 
@@ -122,12 +122,12 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     const tempFile = getPath('atomicity.txt')
 
     // Manager 1
-    const manager1 = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager1 = new SyncMVCCManager(new FileStrategy())
     const tx1 = manager1.createTransaction()
     tx1.create(tempFile, 'In Progress')
 
     // Manager 2 (Simulate Crash/Restart before commit)
-    const manager2 = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager2 = new SyncMVCCManager(new FileStrategy())
     const tx2 = manager2.createTransaction()
 
     // Should NOT see uncommitted data
@@ -138,13 +138,13 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     expect(fs.existsSync(tempFile)).toBe(true)
 
     // Manager 3
-    const manager3 = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager3 = new SyncMVCCManager(new FileStrategy())
     const tx3 = manager3.createTransaction()
     expect(tx3.read(tempFile)).toBe('In Progress')
   })
 
   test('Scenario 5: Read Your Own Writes', () => {
-    const manager = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager = new SyncMVCCManager(new FileStrategy())
     const file = getPath('own_write.txt')
 
     // Initial: "Initial"
@@ -171,7 +171,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 6: Delete-Create Cycle', () => {
-    const manager = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager = new SyncMVCCManager(new FileStrategy())
     const cycleFile = getPath('cycle.txt')
 
     // V1
@@ -196,7 +196,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 7: Rollback Integrity', () => {
-    const manager = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager = new SyncMVCCManager(new FileStrategy())
     const stableFile = getPath('stable.txt')
     const dirtyFile = getPath('dirty.txt')
 
@@ -216,7 +216,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 8: Repeated Read (Stability)', () => {
-    const manager = new SyncMVCCManager<string, FileStrategy>(new FileStrategy())
+    const manager = new SyncMVCCManager(new FileStrategy())
     const file = getPath('repeat.txt')
 
     manager.createTransaction().create(file, 'A').commit()
@@ -237,7 +237,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     expect(observer.read(file)).toBe('A') // Still A
   })
 
-  class TestSyncMVCCManager extends SyncMVCCManager<string, FileStrategy> {
+  class TestSyncMVCCManager extends SyncMVCCManager<FileStrategy, string, string> {
     getDeletedCacheSize(): number {
       return this.deletedCache.size
     }

@@ -1,8 +1,8 @@
 import { MVCCStrategy } from '../base'
 
-export abstract class SyncMVCCStrategy<T> extends MVCCStrategy<T> {
-  abstract read(key: string): T
-  abstract write(key: string, value: T): void
-  abstract delete(key: string): void
-  abstract exists(key: string): boolean
+export abstract class SyncMVCCStrategy<K, T> extends MVCCStrategy<K, T> {
+  abstract read(key: K): T
+  abstract write(key: K, value: T): void
+  abstract delete(key: K): void
+  abstract exists(key: K): boolean
 }
