@@ -41,7 +41,6 @@ export class SyncMVCCManager<T, S extends SyncMVCCStrategy<T>> extends MVCCManag
     if (!isReadOnly && this.version > tx.snapshotVersion) {
       // 읽은 파일이나 쓰려는 파일이 수정되었는지 확인
       const affectedKeys = new Set([
-        ...tx.readSet,
         ...tx.writeBuffer.keys(),
         ...tx.deleteBuffer
       ])

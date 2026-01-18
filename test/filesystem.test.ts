@@ -90,11 +90,50 @@ describe('FileSystem MVCC', () => {
     expect(fs.readFileSync(file2, 'utf-8')).toBe('Version 2')
   })
 
+  test('Scenario: Read-Only Transaction Success', () => {
+    const manager = new SyncMVCCManager(new FileStrategy())
+    const file = getPath('readonly.txt')
+    manager.createTransaction().create(file, 'v1').commit()
+
+    const txRead = manager.createTransaction()
+    const txWrite = manager.createTransaction()
+
+    // Read in txRead
+    expect(txRead.read(file)).toBe('v1')
+
+    // Write in txWrite and commit
+    txWrite.write(file, 'v2').commit()
+
+    // txRead should still see v1 (Snapshot)
+    expect(txRead.read(file)).toBe('v1')
+
+    // txRead should commit successfully even though data changed (Snapshot Isolation)
+    expect(() => txRead.commit()).not.toThrow()
+  })
+
+  test('Scenario: Strict Write-Write Conflict', () => {
+    const manager = new SyncMVCCManager(new FileStrategy())
+    const file = getPath('conflict.txt')
+    manager.createTransaction().create(file, 'start').commit()
+
+    const tx1 = manager.createTransaction()
+    const tx2 = manager.createTransaction()
+
+    tx1.write(file, 'tx1')
+    tx2.write(file, 'tx2')
+
+    tx1.commit()
+
+    // tx2 must fail
+    expect(() => tx2.commit()).toThrow('Commit conflict')
+  })
+
   test('Persistence', () => {
     const file3 = getPath('file3.txt')
     const manager1 = new SyncMVCCManager(new FileStrategy())
     manager1.createTransaction().create(file3, 'Persistent Data').commit()
 
+    // New Manager instance should see data
     const manager2 = new SyncMVCCManager(new FileStrategy())
     const tx = manager2.createTransaction()
 
