@@ -1,0 +1,38 @@
+{
+  "name": "mvcc-api",
+  "version": "0.0.1",
+  "description": "",
+  "license": "MIT",
+  "author": "izure <admin@izure.org>",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "require": "./dist/cjs/index.js",
+      "import": "./dist/esm/index.js"
+    }
+  },
+  "files": [
+    "./dist/**/*"
+  ],
+  "scripts": {
+    "test": "jest",
+    "build": "node build/index.mjs && tsc"
+  },
+  "keywords": [
+    "mvcc"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/izure1/mvcc-api.git"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "esbuild": "^0.27.2",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.9.3"
+  }
+}
