@@ -1,17 +1,17 @@
 {
   "name": "mvcc-api",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Multiversion Concurrency Control (MVCC) API for TypeScript",
   "license": "MIT",
   "author": "izure <admin@izure.org>",
-  "main": "./dist/cjs/index.js",
-  "module": "./dist/esm/index.js",
+  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/esm/index.mjs",
   "types": "./dist/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "require": "./dist/cjs/index.js",
-      "import": "./dist/esm/index.js"
+      "require": "./dist/cjs/index.cjs",
+      "import": "./dist/esm/index.mjs"
     }
   },
   "files": [
