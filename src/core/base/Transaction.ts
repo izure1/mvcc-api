@@ -22,6 +22,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   readonly keyVersions: Map<K, number> // Key -> Local Version (When it was modified locally)
 
   // Root Transaction Properties (Only populated if this is Root)
+  readonly root: MVCCTransaction<S, K, T>
   protected strategy?: S
   protected version: number = 0
   protected versionIndex: Map<K, Array<{ version: number, exists: boolean }>> = new Map()
@@ -40,12 +41,14 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
       this.localVersion = parent.localVersion
       this.snapshotLocalVersion = parent.localVersion
       this.strategy = undefined
+      this.root = parent.root
     } else {
       if (!strategy) throw new Error('Root Transaction must get Strategy')
       this.strategy = strategy
       this.version = 0
       this.localVersion = 0
       this.snapshotLocalVersion = 0
+      this.root = this
     }
   }
 
@@ -101,6 +104,12 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.writeBuffer.clear()
     this.deleteBuffer.clear()
     this.committed = true
+
+    // Deregister from Root's active transactions for GC
+    if (this.root !== this) {
+      (this.root as any).activeTransactions.delete(this)
+    }
+
     return this
   }
 

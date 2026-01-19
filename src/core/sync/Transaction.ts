@@ -9,9 +9,7 @@ export class SyncMVCCTransaction<
   createNested(): this {
     const childVersion = this.isRoot() ? this.version : this.snapshotVersion
     const child = new SyncMVCCTransaction(undefined, this, childVersion) as this
-    if (this.isRoot()) {
-      this.activeTransactions.add(child)
-    }
+    (this.root as any).activeTransactions.add(child)
     return child
   }
 
@@ -89,12 +87,12 @@ export class SyncMVCCTransaction<
       }
 
       (this as any).localVersion = newLocalVersion;
+      (this.root as any).activeTransactions.delete(child)
 
     } else {
       // Root Logic: Persistence
 
-      // Removed from active transactions as it's committing
-      this.activeTransactions.delete(child)
+      (this.root as any).activeTransactions.delete(child)
 
       const newVersion = this.version + 1
 
