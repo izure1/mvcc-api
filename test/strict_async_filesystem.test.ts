@@ -63,13 +63,13 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     // Simulate 50 concurrent transactions
     const txs = Array.from({ length: 50 }, () => root.createNested())
 
-    const results = await Promise.allSettled(txs.map(async (tx, index) => {
+    const results = await Promise.all(txs.map(async (tx, index) => {
       await tx.write(counterFile, `${index + 1}`)
       return tx.commit()
     }))
 
-    const successCount = results.filter(r => r.status === 'fulfilled').length
-    const failureCount = results.filter(r => r.status === 'rejected').length
+    const successCount = results.filter(r => r.success).length
+    const failureCount = results.filter(r => !r.success).length
 
     // Only ONE should succeed. 49 should fail.
     expect(successCount).toBe(1)
@@ -321,18 +321,18 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const txsA = Array.from({ length: 50 }, () => root.createNested())
     const txsB = Array.from({ length: 50 }, () => root.createNested())
 
-    const allrs = await Promise.allSettled([
+    const allrs = await Promise.all([
       ...txsA.map(async (tx, i) => {
         await tx.write(fileA, `A${i}`)
-        await tx.commit()
+        return tx.commit()
       }),
       ...txsB.map(async (tx, i) => {
         await tx.write(fileB, `B${i}`)
-        await tx.commit()
+        return tx.commit()
       })
     ])
 
-    const successCount = allrs.filter(r => r.status === 'fulfilled').length
+    const successCount = allrs.filter(r => r.success).length
     expect(successCount).toBe(2)
   })
 })

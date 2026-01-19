@@ -354,7 +354,9 @@ describe('Key Conflict Detection Tests', () => {
     child.create('A', 'child_value')
 
     // 자식 커밋 시 충돌 발생
-    expect(() => child.commit()).toThrow(/conflict/i)
+    const result = child.commit()
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/conflict/i)
   })
 
   // 다른 키를 수정하면 충돌 없음
@@ -373,7 +375,8 @@ describe('Key Conflict Detection Tests', () => {
     child.create('A', 'child_value')
 
     // 충돌 없이 정상 커밋
-    expect(() => child.commit()).not.toThrow()
+    const result = child.commit()
+    expect(result.success).toBe(true)
     expect(parent.read('A')).toBe('child_value')
   })
 
@@ -394,7 +397,9 @@ describe('Key Conflict Detection Tests', () => {
     c.create('shared', 'c_value')
 
     // c 커밋 시 충돌
-    expect(() => c.commit()).toThrow(/conflict.*shared/i)
+    const result = c.commit()
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/conflict.*shared/i)
   })
 
   // 3단계 중첩: c에서 수정, b에서 다른 키 수정 시 충돌 없음
@@ -414,7 +419,8 @@ describe('Key Conflict Detection Tests', () => {
     c.create('C', 'c_value')
 
     // 충돌 없이 커밋
-    expect(() => c.commit()).not.toThrow()
+    const result = c.commit()
+    expect(result.success).toBe(true)
     expect(b.read('C')).toBe('c_value')
     expect(b.read('B')).toBe('b_value')
   })
@@ -435,10 +441,13 @@ describe('Key Conflict Detection Tests', () => {
     sibling2.create('shared', 'sibling2_val')
 
     // sibling1 먼저 커밋 - 성공
-    expect(() => sibling1.commit()).not.toThrow()
+    const result1 = sibling1.commit()
+    expect(result1.success).toBe(true)
 
     // sibling2 커밋 시 충돌 (sibling1이 이미 같은 키를 커밋함)
-    expect(() => sibling2.commit()).toThrow(/conflict.*shared/i)
+    const result2 = sibling2.commit()
+    expect(result2.success).toBe(false)
+    expect(result2.error).toMatch(/conflict.*shared/i)
   })
 
   // 형제 트랜잭션 간 다른 키 수정 시 충돌 없음
@@ -457,8 +466,10 @@ describe('Key Conflict Detection Tests', () => {
     sibling2.create('key2', 'sibling2_val')
 
     // 둘 다 성공적으로 커밋
-    expect(() => sibling1.commit()).not.toThrow()
-    expect(() => sibling2.commit()).not.toThrow()
+    const result1 = sibling1.commit()
+    const result2 = sibling2.commit()
+    expect(result1.success).toBe(true)
+    expect(result2.success).toBe(true)
 
     expect(parent.read('key1')).toBe('sibling1_val')
     expect(parent.read('key2')).toBe('sibling2_val')
@@ -480,7 +491,9 @@ describe('Key Conflict Detection Tests', () => {
     child.write('target', 'child_value')
 
     // 충돌 발생
-    expect(() => child.commit()).toThrow(/conflict.*target/i)
+    const result = child.commit()
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/conflict.*target/i)
   })
 
   // TransactionResult 반환값 테스트

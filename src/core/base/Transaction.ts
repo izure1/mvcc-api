@@ -172,8 +172,9 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   /**
    * Merges a child transaction's changes into this transaction.
    * @param child The committed child transaction.
+   * @returns Error message if conflict, null if success.
    */
-  abstract _merge(child: MVCCTransaction<S, K, T>): Deferred<void>
+  abstract _merge(child: MVCCTransaction<S, K, T>): Deferred<string | null>
 
   /**
    * Reads a value at a specific snapshot version.

@@ -64,11 +64,11 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     let failureCount = 0
 
     txs.forEach((tx, index) => {
-      try {
-        tx.write(counterFile, `${index + 1}`)
-        tx.commit()
+      tx.write(counterFile, `${index + 1}`)
+      const result = tx.commit()
+      if (result.success) {
         successCount++
-      } catch (e) {
+      } else {
         failureCount++
       }
     })

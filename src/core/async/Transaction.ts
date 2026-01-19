@@ -104,7 +104,9 @@ export class AsyncMVCCTransaction<
 
   async commit(): Promise<TransactionResult<K, T>> {
     return this.writeLock(async () => {
-      if (this.committed) throw new Error('Transaction already committed')
+      if (this.committed) {
+        return { success: false, error: 'Transaction already committed', created: [], updated: [], deleted: [] }
+      }
 
       const created: TransactionEntry<K, T>[] = []
       const updated: TransactionEntry<K, T>[] = []
@@ -124,12 +126,18 @@ export class AsyncMVCCTransaction<
       }
 
       if (this.parent) {
-        await this.parent._merge(this)
+        const error = await this.parent._merge(this)
+        if (error) {
+          return { success: false, error, created: [], updated: [], deleted: [] }
+        }
         this.committed = true // Nested 트랜잭션은 커밋 후 사용 불가
       } else {
         // Root Logic: 커밋 후에도 계속 사용 가능
         if (this.writeBuffer.size > 0 || this.deleteBuffer.size > 0) {
-          await this._merge(this)
+          const error = await this._merge(this)
+          if (error) {
+            return { success: false, error, created: [], updated: [], deleted: [] }
+          }
           this.writeBuffer.clear()
           this.deleteBuffer.clear()
           this.createdKeys.clear()
@@ -144,7 +152,7 @@ export class AsyncMVCCTransaction<
     })
   }
 
-  async _merge(child: MVCCTransaction<S, K, T>): Promise<void> {
+  async _merge(child: MVCCTransaction<S, K, T>): Promise<string | null> {
     return this.writeLock(async () => {
       if (this.parent) {
         // Nested Logic: Merge to self (Parent of Child)
@@ -152,13 +160,13 @@ export class AsyncMVCCTransaction<
         for (const key of child.writeBuffer.keys()) {
           const lastModLocalVer = this.keyVersions.get(key)
           if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
-            throw new Error(`Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`)
+            return `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`
           }
         }
         for (const key of child.deleteBuffer) {
           const lastModLocalVer = this.keyVersions.get(key)
           if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
-            throw new Error(`Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`)
+            return `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`
           }
         }
 
@@ -203,7 +211,7 @@ export class AsyncMVCCTransaction<
           if (versions && versions.length > 0) {
             const lastVer = versions[versions.length - 1].version
             if (lastVer > child.snapshotVersion) {
-              throw new Error(`Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`)
+              return `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`
             }
           }
         }
@@ -221,6 +229,8 @@ export class AsyncMVCCTransaction<
         // 3. Garbage Collection
         this._cleanupDeletedCache()
       }
+
+      return null
     })
   }
 

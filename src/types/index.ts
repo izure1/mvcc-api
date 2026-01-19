@@ -12,6 +12,7 @@ export type TransactionEntry<K, T> = {
 
 export type TransactionResult<K, T> = {
   success: boolean
+  error?: string
   created: TransactionEntry<K, T>[]
   updated: TransactionEntry<K, T>[]
   deleted: TransactionEntry<K, T>[]

@@ -65,9 +65,10 @@ describe('FileSystem MVCC', () => {
 
     tx4.write(file2, 'Modified by TX4').commit()
 
-    expect(() => {
-      tx3.write(file2, 'Modified by TX3').commit()
-    }).toThrow(/Commit conflict/)
+    tx3.write(file2, 'Modified by TX3')
+    const result = tx3.commit()
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/Commit conflict/)
   })
 
   test('Scenario 3: Copy-on-Write', () => {
@@ -108,7 +109,8 @@ describe('FileSystem MVCC', () => {
     expect(txRead.read(file)).toBe('v1')
 
     // txRead should commit successfully even though data changed (Snapshot Isolation)
-    expect(() => txRead.commit()).not.toThrow()
+    const result = txRead.commit()
+    expect(result.success).toBe(true)
   })
 
   test('Scenario: Strict Write-Write Conflict', () => {
@@ -125,7 +127,9 @@ describe('FileSystem MVCC', () => {
     tx1.commit()
 
     // tx2 must fail
-    expect(() => tx2.commit()).toThrow('Commit conflict')
+    const result = tx2.commit()
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/Commit conflict/)
   })
 
   test('Persistence', () => {
