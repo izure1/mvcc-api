@@ -76,6 +76,16 @@ export class AsyncMVCCTransaction<
     return (this.root as any)._diskRead(key, this.snapshotVersion)
   }
 
+  async exists(key: K): Promise<boolean> {
+    if (this.committed) throw new Error('Transaction already committed')
+    // 1. 삭제 버퍼에 있으면 존재하지 않음
+    if (this.deleteBuffer.has(key)) return false
+    // 2. 쓰기 버퍼에 있으면 존재함
+    if (this.writeBuffer.has(key)) return true
+    // 3. 디스크에서 확인
+    return (this.root as any)._diskExists(key, this.snapshotVersion)
+  }
+
   async _readSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Promise<T | null> {
     // 커밋된 root라도 디스크 읽기는 가능해야 함 (자식 트랜잭션이 읽기 가능)
 
@@ -287,6 +297,28 @@ export class AsyncMVCCTransaction<
     }
 
     return null
+  }
+
+  async _diskExists(key: K, snapshotVersion: number): Promise<boolean> {
+    const strategy = this.strategy
+    if (!strategy) throw new Error('Root Transaction missing strategy')
+    const versions = this.versionIndex.get(key)
+    if (!versions) {
+      return strategy.exists(key)
+    }
+
+    let targetVerObj: { version: number, exists: boolean } | null = null
+
+    for (const v of versions) {
+      if (v.version <= snapshotVersion) {
+        targetVerObj = v
+      } else {
+        break
+      }
+    }
+
+    if (!targetVerObj) return strategy.exists(key)
+    return targetVerObj.exists
   }
 
   async _diskDelete(key: K, snapshotVersion: number): Promise<void> {

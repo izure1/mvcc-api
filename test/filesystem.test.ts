@@ -143,4 +143,36 @@ describe('FileSystem MVCC', () => {
 
     expect(tx.read(file3)).toBe('Persistent Data')
   })
+
+  test('Scenario: exists() method', () => {
+    const root = new SyncMVCCTransaction(new FileStrategy())
+    const file = getPath('exists_test.txt')
+
+    // 1. 존재하지 않는 키
+    const tx1 = root.createNested()
+    expect(tx1.exists(file)).toBe(false)
+
+    // 2. create 후 버퍼에서 존재
+    tx1.create(file, 'test value')
+    expect(tx1.exists(file)).toBe(true)
+    tx1.commit()
+
+    // 3. 커밋 후 디스크에서 존재
+    const tx2 = root.createNested()
+    expect(tx2.exists(file)).toBe(true)
+
+    // 4. 삭제 버퍼에 있으면 존재하지 않음
+    tx2.delete(file)
+    expect(tx2.exists(file)).toBe(false)
+
+    // 5. 스냅샷 격리: 삭제 전 스냅샷은 여전히 존재로 보임
+    const tx3 = root.createNested()
+    expect(tx3.exists(file)).toBe(true) // tx2가 아직 커밋 안 함
+
+    tx2.commit()
+
+    // 6. 삭제 커밋 후 새 트랜잭션에서는 존재하지 않음
+    const tx4 = root.createNested()
+    expect(tx4.exists(file)).toBe(false)
+  })
 })

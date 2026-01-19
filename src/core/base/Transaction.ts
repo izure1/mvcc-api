@@ -156,6 +156,13 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   abstract read(key: K): Deferred<T | null>
 
   /**
+   * Checks if a key exists in the transaction's snapshot.
+   * @param key The key to check.
+   * @returns True if the key exists, false otherwise.
+   */
+  abstract exists(key: K): Deferred<boolean>
+
+  /**
    * Commits the transaction.
    * If root, persists to storage.
    * If nested, merges to parent.

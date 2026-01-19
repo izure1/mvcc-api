@@ -77,6 +77,7 @@ const tx = root.createNested()
 await tx.create('new.json', '{}')        // Create new key
 await tx.write('config.json', '{"v":2}') // Update existing key
 await tx.delete('old.json')              // Delete key
+await tx.exists('config.json')           // true
 
 const result = await tx.commit()
 // result.created = [{ key: 'new.json', data: '{}' }]
@@ -177,6 +178,7 @@ const bResult = b.commit()
 | `write(key, value)` | Update existing key | `this` |
 | `delete(key)` | Delete key | `this` |
 | `read(key)` | Read value | `T \| null` |
+| `exists(key)` | Check if key exists | `boolean` |
 | `commit()` | Apply changes | `TransactionResult<K, T>` |
 | `rollback()` | Discard changes | `TransactionResult<K, T>` |
 | `createNested()` | Create child transaction | `MVCCTransaction` |
