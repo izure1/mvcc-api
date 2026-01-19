@@ -4,3 +4,10 @@ export type DeleteEntry<T> = {
   value: T
   deletedAtVersion: number
 }
+
+export type TransactionResult<K> = {
+  success: boolean
+  created: K[]
+  updated: K[]
+  deleted: K[]
+}

@@ -1,4 +1,5 @@
 import type { SyncMVCCStrategy } from './Strategy'
+import type { TransactionResult } from '../../types'
 import { MVCCTransaction } from '../base'
 
 export class SyncMVCCTransaction<
@@ -56,8 +57,19 @@ export class SyncMVCCTransaction<
     }
   }
 
-  commit(): this {
+  commit(): TransactionResult<K> {
     if (this.committed) throw new Error('Transaction already committed')
+
+    const created: K[] = []
+    const updated: K[] = []
+    for (const key of this.writeBuffer.keys()) {
+      if (this.createdKeys.has(key)) {
+        created.push(key)
+      } else {
+        updated.push(key)
+      }
+    }
+    const deleted = [...this.deleteBuffer]
 
     if (this.parent) {
       this.parent._merge(this)
@@ -68,13 +80,14 @@ export class SyncMVCCTransaction<
         this._merge(this)
         this.writeBuffer.clear()
         this.deleteBuffer.clear()
+        this.createdKeys.clear()
         this.keyVersions.clear()
         this.localVersion = 0
       }
       // root는 committed를 true로 설정하지 않음 - 재사용 가능
     }
 
-    return this
+    return { success: true, created, updated, deleted }
   }
 
   _merge(child: MVCCTransaction<S, K, T>): void {
@@ -94,14 +107,21 @@ export class SyncMVCCTransaction<
         }
       }
 
-      // 2. Merge buffers
+      // 2. Merge buffers (직접 버퍼에 추가하여 createdKeys 유지)
       const newLocalVersion = this.localVersion + 1
       for (const key of child.writeBuffer.keys()) {
-        this.write(key, child.writeBuffer.get(key)!)
+        this.writeBuffer.set(key, child.writeBuffer.get(key)!)
+        this.deleteBuffer.delete(key)
         this.keyVersions.set(key, newLocalVersion)
+        // 자식이 create한 키면 부모의 createdKeys에도 추가
+        if (child.createdKeys.has(key)) {
+          this.createdKeys.add(key)
+        }
       }
       for (const key of child.deleteBuffer) {
-        this.delete(key)
+        this.deleteBuffer.add(key)
+        this.writeBuffer.delete(key)
+        this.createdKeys.delete(key) // 삭제된 키는 created가 아님
         this.keyVersions.set(key, newLocalVersion)
       }
 

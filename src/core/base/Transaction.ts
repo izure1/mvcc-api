@@ -1,4 +1,4 @@
-import type { Deferred } from '../../types'
+import type { Deferred, TransactionResult } from '../../types'
 import type { MVCCStrategy } from './Strategy'
 
 /**
@@ -15,6 +15,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   readonly snapshotLocalVersion: number
   readonly writeBuffer: Map<K, T>
   readonly deleteBuffer: Set<K>
+  readonly createdKeys: Set<K> // create()로 생성된 키 추적
 
   // Nested Transaction Properties
   readonly parent?: MVCCTransaction<S, K, T>
@@ -33,6 +34,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.snapshotVersion = snapshotVersion ?? 0
     this.writeBuffer = new Map()
     this.deleteBuffer = new Set()
+    this.createdKeys = new Set()
     this.committed = false
     this.parent = parent
     this.keyVersions = new Map()
@@ -66,6 +68,8 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   create(key: K, value: T): this {
     if (this.committed) throw new Error('Transaction already committed')
     this.writeBuffer.set(key, value)
+    this.createdKeys.add(key)
+    this.deleteBuffer.delete(key)
     return this
   }
 
@@ -82,6 +86,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.writeBuffer.set(key, value)
     this.deleteBuffer.delete(key)
     this.keyVersions.set(key, this.localVersion)
+    // write는 update이므로 createdKeys에서 제거하지 않음 (이미 create된 키면 created 유지)
     return this
   }
 
@@ -95,6 +100,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.localVersion++
     this.deleteBuffer.add(key)
     this.writeBuffer.delete(key)
+    this.createdKeys.delete(key) // 삭제하면 created 상태가 아님
     this.keyVersions.set(key, this.localVersion)
     return this
   }
@@ -102,11 +108,23 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   /**
    * Rolls back the transaction.
    * Clears all buffers and marks the transaction as finished.
-   * @returns The transaction instance.
+   * @returns The result object with success, created, updated, and deleted keys.
    */
-  rollback(): this {
+  rollback(): TransactionResult<K> {
+    const created: K[] = []
+    const updated: K[] = []
+    for (const key of this.writeBuffer.keys()) {
+      if (this.createdKeys.has(key)) {
+        created.push(key)
+      } else {
+        updated.push(key)
+      }
+    }
+    const deleted = [...this.deleteBuffer]
+
     this.writeBuffer.clear()
     this.deleteBuffer.clear()
+    this.createdKeys.clear()
     this.committed = true
 
     // Deregister from Root's active transactions for GC
@@ -114,7 +132,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
       (this.root as any).activeTransactions.delete(this)
     }
 
-    return this
+    return { success: true, created, updated, deleted }
   }
 
   /**
@@ -128,9 +146,9 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    * Commits the transaction.
    * If root, persists to storage.
    * If nested, merges to parent.
-   * @returns The transaction instance.
+   * @returns The result object with success, created, and obsolete keys.
    */
-  abstract commit(): Deferred<this>
+  abstract commit(): Deferred<TransactionResult<K>>
 
   /**
    * Creates a nested transaction (child) from this transaction.

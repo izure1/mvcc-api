@@ -1,4 +1,5 @@
 import type { AsyncMVCCStrategy } from './Strategy'
+import type { TransactionResult } from '../../types'
 import { Ryoiki } from 'ryoiki'
 import { MVCCTransaction } from '../base'
 
@@ -64,9 +65,20 @@ export class AsyncMVCCTransaction<
     }
   }
 
-  async commit(): Promise<this> {
+  async commit(): Promise<TransactionResult<K>> {
     return this.writeLock(async () => {
       if (this.committed) throw new Error('Transaction already committed')
+
+      const created: K[] = []
+      const updated: K[] = []
+      for (const key of this.writeBuffer.keys()) {
+        if (this.createdKeys.has(key)) {
+          created.push(key)
+        } else {
+          updated.push(key)
+        }
+      }
+      const deleted = [...this.deleteBuffer]
 
       if (this.parent) {
         await this.parent._merge(this)
@@ -77,13 +89,14 @@ export class AsyncMVCCTransaction<
           await this._merge(this)
           this.writeBuffer.clear()
           this.deleteBuffer.clear()
+          this.createdKeys.clear()
           this.keyVersions.clear()
           this.localVersion = 0
         }
         // root는 committed를 true로 설정하지 않음 - 재사용 가능
       }
 
-      return this
+      return { success: true, created, updated, deleted }
     })
   }
 
