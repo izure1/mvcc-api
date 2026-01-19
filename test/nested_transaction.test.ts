@@ -513,4 +513,224 @@ describe('Key Conflict Detection Tests', () => {
     expect(result.created).toContain('created_key')
     expect(result.deleted).toContain('k1')
   })
+
+  // 부모 커밋 시 자식 변경사항 누적
+  test('a-b-c: c 커밋 후 b 커밋 시 c의 created도 포함', () => {
+    const root = new TestRootTransaction(new InMemoryStrategy())
+    root.write('base', 'v1')
+    root.commit()
+
+    const a = root.createNested()
+    const b = a.createNested()
+    const c = b.createNested()
+
+    // c에서 'A' 키 생성
+    c.create('A', 'c_value')
+    const cResult = c.commit()
+
+    expect(cResult.created).toContain('A')
+    expect(cResult.updated).toEqual([])
+
+    // b에서 'B' 키 수정
+    b.write('B', 'b_value')
+    const bResult = b.commit()
+
+    // b의 결과에 c의 created 'A'도 포함되어야 함
+    expect(bResult.created).toContain('A')
+    expect(bResult.updated).toContain('B')
+    expect(bResult.deleted).toEqual([])
+  })
+
+  // 롤백 시에도 자식 변경사항 누적
+  test('a-b-c: c 커밋 후 b 롤백 시 c의 created도 포함', () => {
+    const root = new TestRootTransaction(new InMemoryStrategy())
+    root.write('base', 'v1')
+    root.commit()
+
+    const a = root.createNested()
+    const b = a.createNested()
+    const c = b.createNested()
+
+    // c에서 'A' 키 생성
+    c.create('A', 'c_value')
+    c.commit()
+
+    // b에서 'B' 키 수정
+    b.write('B', 'b_value')
+
+    const bResult = b.rollback()
+
+    // b의 롤백 결과에 c의 created 'A'도 포함되어야 함
+    expect(bResult.created).toContain('A')
+    expect(bResult.updated).toContain('B')
+    expect(bResult.deleted).toEqual([])
+  })
+
+  // 4단계 누적: a-b-c-d에서 d->c->b 순서로 커밋
+  test('4단계 누적: d->c->b 커밋 시 모든 created 누적', () => {
+    const root = new TestRootTransaction(new InMemoryStrategy())
+    root.write('base', 'v1')
+    root.commit()
+
+    const a = root.createNested()
+    const b = a.createNested()
+    const c = b.createNested()
+    const d = c.createNested()
+
+    d.create('D', 'd_value')
+    d.commit()
+
+    c.create('C', 'c_value')
+    c.commit()
+
+    b.create('B', 'b_value')
+    const bResult = b.commit()
+
+    // b의 결과에 d, c, b의 created 모두 포함
+    expect(bResult.created).toContain('D')
+    expect(bResult.created).toContain('C')
+    expect(bResult.created).toContain('B')
+  })
+
+  // 자식이 삭제한 키는 부모 created에서 제외
+  test('자식이 create 후 삭제하면 부모 created에서 제외', () => {
+    const root = new TestRootTransaction(new InMemoryStrategy())
+    root.write('base', 'v1')
+    root.commit()
+
+    const a = root.createNested()
+    const b = a.createNested()
+    const c = b.createNested()
+
+    c.create('temp', 'temp_value')
+    c.delete('temp')  // 바로 삭제
+    c.commit()
+
+    b.write('B', 'b_value')
+    const bResult = b.commit()
+
+    // 'temp'는 create 후 delete되었으므로 created에 없어야 함
+    expect(bResult.created).not.toContain('temp')
+    // 대신 deleted에 있을 수 있음
+    expect(bResult.deleted).toContain('temp')
+  })
+
+  // b에서 먼저 수정 후 c 생성/커밋 시에도 동일한 결과
+  test('b 먼저 수정 → c 생성/커밋 → b 커밋: 순서 무관하게 동일 결과', () => {
+    const root = new TestRootTransaction(new InMemoryStrategy())
+    root.write('base', 'v1')
+    root.commit()
+
+    const a = root.createNested()
+    const b = a.createNested()
+
+    // b에서 먼저 수정
+    b.write('B', 'b_value')
+
+    // 그 다음 c 생성
+    const c = b.createNested()
+    c.create('A', 'c_value')
+    const cResult = c.commit()
+
+    expect(cResult.created).toContain('A')
+
+    // b 커밋
+    const bResult = b.commit()
+
+    // 순서에 관계없이 동일한 결과
+    expect(bResult.created).toContain('A')
+    expect(bResult.updated).toContain('B')
+    expect(bResult.deleted).toEqual([])
+  })
+
+  // 복잡한 순서: b 수정 → c 생성 → b 추가 수정 → c 커밋 → b 커밋
+  test('복잡한 순서에서도 정확한 결과 반환', () => {
+    const root = new TestRootTransaction(new InMemoryStrategy())
+    root.write('base', 'v1')
+    root.commit()
+
+    const a = root.createNested()
+    const b = a.createNested()
+
+    // 1. b에서 'B1' 수정
+    b.write('B1', 'b1_value')
+
+    // 2. c 생성
+    const c = b.createNested()
+
+    // 3. b에서 'B2' 추가 수정 (c 생성 후)
+    b.write('B2', 'b2_value')
+
+    // 4. c에서 'A' 생성 및 커밋
+    c.create('A', 'c_value')
+    c.commit()
+
+    // 5. b 커밋
+    const bResult = b.commit()
+
+    // A는 created (c에서 생성)
+    expect(bResult.created).toContain('A')
+    // B1, B2는 updated (b에서 write)
+    expect(bResult.updated).toContain('B1')
+    expect(bResult.updated).toContain('B2')
+  })
+
+  // 자식 롤백 시 부모에게 전달되지 않음
+  test('c 롤백 → b 커밋: c의 변경사항이 b 결과에 포함되지 않음', () => {
+    const root = new TestRootTransaction(new InMemoryStrategy())
+    root.write('base', 'v1')
+    root.commit()
+
+    const a = root.createNested()
+    const b = a.createNested()
+    const c = b.createNested()
+
+    // c에서 'A' 생성 후 롤백
+    c.create('A', 'c_value')
+    const cRollbackResult = c.rollback()
+
+    // c의 롤백 결과에는 'A'가 있음
+    expect(cRollbackResult.created).toContain('A')
+
+    // b에서 'B' 생성 후 커밋
+    b.create('B', 'b_value')
+    const bResult = b.commit()
+
+    // b의 결과에는 c의 'A'가 없어야 함 (롤백됨)
+    expect(bResult.created).toContain('B')
+    expect(bResult.created).not.toContain('A')
+    expect(bResult.updated).toEqual([])
+    expect(bResult.deleted).toEqual([])
+  })
+
+  // 여러 자식 중 일부만 롤백
+  test('형제 중 일부 롤백: 커밋된 형제만 부모에 반영', () => {
+    const root = new TestRootTransaction(new InMemoryStrategy())
+    root.write('base', 'v1')
+    root.commit()
+
+    const parent = root.createNested()
+
+    const child1 = parent.createNested()
+    const child2 = parent.createNested()
+    const child3 = parent.createNested()
+
+    child1.create('C1', 'val1')
+    child2.create('C2', 'val2')
+    child3.create('C3', 'val3')
+
+    // child1 커밋, child2 롤백, child3 커밋
+    child1.commit()
+    child2.rollback()
+    child3.commit()
+
+    parent.create('P', 'parent_val')
+    const parentResult = parent.commit()
+
+    // C1, C3, P는 포함, C2는 미포함
+    expect(parentResult.created).toContain('C1')
+    expect(parentResult.created).not.toContain('C2')
+    expect(parentResult.created).toContain('C3')
+    expect(parentResult.created).toContain('P')
+  })
 })

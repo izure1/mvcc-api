@@ -118,14 +118,21 @@ export class AsyncMVCCTransaction<
           }
         }
 
-        // 2. Merge buffers
+        // 2. Merge buffers (직접 버퍼에 추가하여 createdKeys 유지)
         const newLocalVersion = this.localVersion + 1
         for (const key of child.writeBuffer.keys()) {
-          this.write(key, child.writeBuffer.get(key)!)
+          this.writeBuffer.set(key, child.writeBuffer.get(key)!)
+          this.deleteBuffer.delete(key)
           this.keyVersions.set(key, newLocalVersion)
+          // 자식이 create한 키면 부모의 createdKeys에도 추가
+          if (child.createdKeys.has(key)) {
+            this.createdKeys.add(key)
+          }
         }
         for (const key of child.deleteBuffer) {
-          this.delete(key)
+          this.deleteBuffer.add(key)
+          this.writeBuffer.delete(key)
+          this.createdKeys.delete(key) // 삭제된 키는 created가 아님
           this.keyVersions.set(key, newLocalVersion)
         }
 
