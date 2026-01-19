@@ -30,7 +30,9 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const historyFile = getPath('history.txt')
 
     // Initial State
-    await (await root.createNested().create(historyFile, 'Generation 0').commit())
+    const initTx = root.createNested()
+    await initTx.create(historyFile, 'Generation 0')
+    await initTx.commit()
 
     // Start Long Running Reader
     const reader = root.createNested()
@@ -39,7 +41,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     // Perform 50 sequential updates
     for (let i = 1; i <= 50; i++) {
       const writer = root.createNested()
-      writer.write(historyFile, `Generation ${i}`)
+      await writer.write(historyFile, `Generation ${i}`)
       await writer.commit()
     }
 
@@ -54,13 +56,15 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const counterFile = getPath('counter.txt');
 
-    (await root.createNested().create(counterFile, '0').commit())
+    const initTx = root.createNested()
+    await initTx.create(counterFile, '0')
+    await initTx.commit()
 
     // Simulate 50 concurrent transactions
     const txs = Array.from({ length: 50 }, () => root.createNested())
 
     const results = await Promise.allSettled(txs.map(async (tx, index) => {
-      tx.write(counterFile, `${index + 1}`)
+      await tx.write(counterFile, `${index + 1}`)
       return tx.commit()
     }))
 
@@ -78,8 +82,8 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const accB = getPath('B.txt')
 
     const initialTx = root.createNested()
-    initialTx.create(accA, '100')
-    initialTx.create(accB, '0')
+    await initialTx.create(accA, '100')
+    await initialTx.create(accB, '0')
     await initialTx.commit()
 
     // Verification Transaction
@@ -100,8 +104,8 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
       const currentA = parseInt((await txTransfer.read(accA)) as string)
       const currentB = parseInt((await txTransfer.read(accB)) as string)
 
-      txTransfer.write(accA, (currentA - 10).toString())
-      txTransfer.write(accB, (currentB + 10).toString())
+      await txTransfer.write(accA, (currentA - 10).toString())
+      await txTransfer.write(accB, (currentB + 10).toString())
       await txTransfer.commit()
 
       // Observer should still see old total 100
@@ -119,7 +123,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     // Root 1
     const root1 = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const tx1 = root1.createNested()
-    tx1.create(tempFile, 'In Progress')
+    await tx1.create(tempFile, 'In Progress')
 
     // Root 2
     const root2 = new AsyncMVCCTransaction(new AsyncFileStrategy())
@@ -147,15 +151,17 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const file = getPath('own_write.txt')
 
-    await (await root.createNested().create(file, 'Initial').commit())
+    const initTx = root.createNested()
+    await initTx.create(file, 'Initial')
+    await initTx.commit()
 
     const tx = root.createNested()
     expect(await tx.read(file)).toBe('Initial')
 
-    tx.write(file, 'Modified')
+    await tx.write(file, 'Modified')
     expect(await tx.read(file)).toBe('Modified')
 
-    tx.delete(file)
+    await tx.delete(file)
     expect(await tx.read(file)).toBeNull()
 
     await tx.commit()
@@ -172,16 +178,18 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const cycleFile = getPath('cycle.txt')
 
-    await (await root.createNested().create(cycleFile, 'V1').commit())
+    const initTx = root.createNested()
+    await initTx.create(cycleFile, 'V1')
+    await initTx.commit()
 
     const oldReader = root.createNested()
 
     const deleteTx = root.createNested()
-    deleteTx.delete(cycleFile)
+    await deleteTx.delete(cycleFile)
     await deleteTx.commit()
 
     const createTx = root.createNested()
-    createTx.create(cycleFile, 'V2')
+    await createTx.create(cycleFile, 'V2')
     await createTx.commit()
 
     const newReader = root.createNested()
@@ -195,11 +203,13 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const stableFile = getPath('stable.txt')
     const dirtyFile = getPath('dirty.txt')
 
-    await (await root.createNested().create(stableFile, 'Stable').commit())
+    const initTx = root.createNested()
+    await initTx.create(stableFile, 'Stable')
+    await initTx.commit()
 
     const tx = root.createNested()
-    tx.create(dirtyFile, 'Dirty')
-    tx.delete(stableFile)
+    await tx.create(dirtyFile, 'Dirty')
+    await tx.delete(stableFile)
 
     tx.rollback()
 
@@ -215,18 +225,20 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const file = getPath('repeat.txt')
 
-    await (await root.createNested().create(file, 'A').commit())
+    const initTx = root.createNested()
+    await initTx.create(file, 'A')
+    await initTx.commit()
 
     const observer = root.createNested()
     expect(await observer.read(file)).toBe('A')
 
     const tx1 = root.createNested()
-    tx1.write(file, 'B')
+    await tx1.write(file, 'B')
     await tx1.commit()
     expect(await observer.read(file)).toBe('A')
 
     const tx2 = root.createNested()
-    tx2.write(file, 'C')
+    await tx2.write(file, 'C')
     await tx2.commit()
     expect(await observer.read(file)).toBe('A')
   })
@@ -240,7 +252,9 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   test('Scenario 9: Garbage Collection Logic (Async)', async () => {
     const root = new TestAsyncMVCCTransaction(new AsyncFileStrategy())
     const file = getPath('gc.txt')
-    await (await root.createNested().create(file, 'Init').commit())
+    const initTx = root.createNested()
+    await initTx.create(file, 'Init')
+    await initTx.commit()
 
     // Create a reader to HOLD the version
     const holder = root.createNested()
@@ -248,7 +262,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
 
     for (let i = 0; i < 10; i++) {
       const tx = root.createNested()
-      tx.write(file, `Update ${i}`)
+      await tx.write(file, `Update ${i}`)
       await tx.commit()
     }
 
@@ -258,7 +272,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     await holder.commit()
 
     const triggerTx = root.createNested()
-    triggerTx.create(getPath('trigger_gc.txt'), 'Trigger')
+    await triggerTx.create(getPath('trigger_gc.txt'), 'Trigger')
     await triggerTx.commit()
 
     expect(root.getDeletedCacheSize()).toBe(0)
@@ -276,7 +290,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
 
     const results = await Promise.allSettled(txs.map(async (tx, i) => {
       const file = getPath(`parallel_${i}.txt`)
-      tx.create(file, `Data ${i}`)
+      await tx.create(file, `Data ${i}`)
       await tx.commit()
     }))
 
@@ -292,8 +306,13 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const fileA = getPath('mixed_A.txt')
     const fileB = getPath('mixed_B.txt')
 
-    await (await root.createNested().create(fileA, '0').commit())
-    await (await root.createNested().create(fileB, '0').commit())
+    const initA = root.createNested()
+    await initA.create(fileA, '0')
+    await initA.commit()
+
+    const initB = root.createNested()
+    await initB.create(fileB, '0')
+    await initB.commit()
 
     // 50 Txs trying to write A, 50 Txs trying to write B.
     // All start at current version.
@@ -304,11 +323,11 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
 
     const allrs = await Promise.allSettled([
       ...txsA.map(async (tx, i) => {
-        tx.write(fileA, `A${i}`)
+        await tx.write(fileA, `A${i}`)
         await tx.commit()
       }),
       ...txsB.map(async (tx, i) => {
-        tx.write(fileB, `B${i}`)
+        await tx.write(fileB, `B${i}`)
         await tx.commit()
       })
     ])

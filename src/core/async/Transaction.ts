@@ -1,5 +1,5 @@
 import type { AsyncMVCCStrategy } from './Strategy'
-import type { TransactionResult } from '../../types'
+import type { TransactionResult, TransactionEntry } from '../../types'
 import { Ryoiki } from 'ryoiki'
 import { MVCCTransaction } from '../base'
 
@@ -18,6 +18,43 @@ export class AsyncMVCCTransaction<
     }).finally(() => {
       this.lock.writeUnlock(lockId)
     })
+  }
+
+  async create(key: K, value: T): Promise<this> {
+    if (this.committed) throw new Error('Transaction already committed')
+    // 이미 버퍼에 있거나 read로 존재하면 오류
+    if (this.writeBuffer.has(key) || (!this.deleteBuffer.has(key) && await this.read(key) !== null)) {
+      throw new Error(`Key already exists: ${key}`)
+    }
+    this._bufferCreate(key, value)
+    return this
+  }
+
+  async write(key: K, value: T): Promise<this> {
+    if (this.committed) throw new Error('Transaction already committed')
+    // 버퍼에 없고 read로도 없으면 오류
+    if (!this.writeBuffer.has(key) && (this.deleteBuffer.has(key) || await this.read(key) === null)) {
+      throw new Error(`Key not found: ${key}`)
+    }
+    this._bufferWrite(key, value)
+    return this
+  }
+
+  async delete(key: K): Promise<this> {
+    if (this.committed) throw new Error('Transaction already committed')
+    // 버퍼에 있으면 그 값을 저장, 아니면 read로 가져옴
+    let valueToDelete: T | null = null
+    if (this.writeBuffer.has(key)) {
+      valueToDelete = this.writeBuffer.get(key)!
+    } else if (!this.deleteBuffer.has(key)) {
+      valueToDelete = await this.read(key)
+    }
+    if (valueToDelete === null) {
+      throw new Error(`Key not found: ${key}`)
+    }
+    this.deletedValues.set(key, valueToDelete)
+    this._bufferDelete(key)
+    return this
   }
 
   createNested(): this {
@@ -65,20 +102,26 @@ export class AsyncMVCCTransaction<
     }
   }
 
-  async commit(): Promise<TransactionResult<K>> {
+  async commit(): Promise<TransactionResult<K, T>> {
     return this.writeLock(async () => {
       if (this.committed) throw new Error('Transaction already committed')
 
-      const created: K[] = []
-      const updated: K[] = []
-      for (const key of this.writeBuffer.keys()) {
+      const created: TransactionEntry<K, T>[] = []
+      const updated: TransactionEntry<K, T>[] = []
+      for (const [key, data] of this.writeBuffer.entries()) {
         if (this.createdKeys.has(key)) {
-          created.push(key)
+          created.push({ key, data })
         } else {
-          updated.push(key)
+          updated.push({ key, data })
         }
       }
-      const deleted = [...this.deleteBuffer]
+      const deleted: TransactionEntry<K, T>[] = []
+      for (const key of this.deleteBuffer) {
+        const data = this.deletedValues.get(key)
+        if (data !== undefined) {
+          deleted.push({ key, data })
+        }
+      }
 
       if (this.parent) {
         await this.parent._merge(this)
@@ -90,6 +133,7 @@ export class AsyncMVCCTransaction<
           this.writeBuffer.clear()
           this.deleteBuffer.clear()
           this.createdKeys.clear()
+          this.deletedValues.clear()
           this.keyVersions.clear()
           this.localVersion = 0
         }
@@ -134,6 +178,11 @@ export class AsyncMVCCTransaction<
           this.writeBuffer.delete(key)
           this.createdKeys.delete(key) // 삭제된 키는 created가 아님
           this.keyVersions.set(key, newLocalVersion)
+          // 자식의 deletedValues도 부모에게 전달
+          const deletedValue = child.deletedValues.get(key)
+          if (deletedValue !== undefined) {
+            this.deletedValues.set(key, deletedValue)
+          }
         }
 
         (this as any).localVersion = newLocalVersion;

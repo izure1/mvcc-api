@@ -1,4 +1,4 @@
-import { SyncMVCCTransaction } from '../src'
+﻿import { SyncMVCCTransaction } from '../src'
 import { SyncMVCCStrategy } from '../src'
 
 // Simple In-Memory Strategy for testing
@@ -31,20 +31,28 @@ class TestRootTransaction extends SyncMVCCTransaction<InMemoryStrategy, string, 
   }
 }
 
+// Helper: check if entries contain a specific key
+const hasKey = <K, T>(entries: { key: K, data: T }[], key: K): boolean =>
+  entries.some(e => e.key === key)
+
+// Helper: get all keys from entries
+const getKeys = <K, T>(entries: { key: K, data: T }[]): K[] =>
+  entries.map(e => e.key)
+
 describe('Nested Transactions', () => {
   // 자식은 부모가 커밋한 데이터만 볼 수 있음
   test('Child sees ONLY committed data from parent', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
 
     // root가 값을 쓰고 커밋
-    root.write('k1', 'committed_v1')
+    root.create('k1', 'committed_v1')
     root.commit()
 
     const parent = root.createNested()
 
     // parent가 미커밋 상태로 값을 변경
     parent.write('k1', 'uncommitted_v2')
-    parent.write('k2', 'uncommitted_new')
+    parent.create('k2', 'uncommitted_new')
 
     const child = parent.createNested()
 
@@ -53,13 +61,13 @@ describe('Nested Transactions', () => {
     expect(child.read('k2')).toBeNull() // 존재하지 않음 (커밋 안 됨)
 
     // 자식 자신이 쓴 값은 볼 수 있음
-    child.write('k3', 'child_val')
+    child.create('k3', 'child_val')
     expect(child.read('k3')).toBe('child_val')
   })
 
   test('Parent does NOT see changes from uncommitted child', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'root_val')
+    root.create('k1', 'root_val')
     root.commit()
 
     const parent = root.createNested()
@@ -74,13 +82,13 @@ describe('Nested Transactions', () => {
   test('Child commit merges changes to parent buffer', () => {
     const strategy = new InMemoryStrategy()
     const root = new TestRootTransaction(strategy)
-    root.write('base', 'base_val')
+    root.create('base', 'base_val')
     root.commit()
 
     const parent = root.createNested()
     const child = parent.createNested()
 
-    child.write('k1', 'child_v1')
+    child.create('k1', 'child_v1')
     child.commit() // Merge to parent's buffer
 
     // Parent's buffer now has child's change
@@ -96,7 +104,7 @@ describe('Nested Transactions', () => {
 
   test('Nested transaction rollback does not affect parent', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'root_val')
+    root.create('k1', 'root_val')
     root.commit()
 
     const parent = root.createNested()
@@ -104,7 +112,7 @@ describe('Nested Transactions', () => {
 
     const child = parent.createNested()
     child.write('k1', 'child_overwrite')
-    child.write('k2', 'child_v1')
+    child.create('k2', 'child_v1')
 
     child.rollback() // Should discard child changes
 
@@ -117,18 +125,18 @@ describe('Nested Transactions', () => {
     const strategy = new InMemoryStrategy()
     const root = new TestRootTransaction(strategy)
 
-    root.write('root', 'val')
+    root.create('root', 'val')
     root.commit() // 이제 root='val'은 커밋됨
 
     const l1 = root.createNested()
-    l1.write('l1', 'val')
+    l1.create('l1', 'val')
 
     const l2 = l1.createNested()
     // l2는 l1의 미커밋 버퍼를 볼 수 없음 - 커밋된 root 데이터만 봄
     expect(l2.read('root')).toBe('val')
     expect(l2.read('l1')).toBeNull() // l1은 아직 커밋 안 함
 
-    l2.write('l2', 'val')
+    l2.create('l2', 'val')
 
     // Isolation (upwards)
     expect(l1.read('l2')).toBeNull()
@@ -145,7 +153,7 @@ describe('Nested Transactions', () => {
 
   test('Shadowing: Child overwrites parent value after commit', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'root_val')
+    root.create('k1', 'root_val')
     root.commit()
 
     const parent = root.createNested()
@@ -172,12 +180,12 @@ describe('Strict Snapshot Isolation Tests', () => {
   test('자식은 부모의 미커밋 버퍼를 볼 수 없음', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
 
-    root.write('k1', 'committed_v1')
+    root.create('k1', 'committed_v1')
     root.commit()
 
     const parent = root.createNested()
     parent.write('k1', 'uncommitted_v2') // 미커밋
-    parent.write('k2', 'uncommitted_new')
+    parent.create('k2', 'uncommitted_new')
 
     const child = parent.createNested()
 
@@ -193,7 +201,7 @@ describe('Strict Snapshot Isolation Tests', () => {
   // 자식 생성 이후 다른 트랜잭션이 커밋해도 자식은 스냅샷 유지
   test('자식 생성 이후 커밋된 데이터는 보이지 않음', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'v1')
+    root.create('k1', 'v1')
     root.commit() // version 1
 
     const tx1 = root.createNested() // snapshotVersion = 1
@@ -210,16 +218,16 @@ describe('Strict Snapshot Isolation Tests', () => {
   // 형제 트랜잭션끼리는 서로의 변경을 볼 수 없음
   test('형제 트랜잭션 독립: 서로의 미커밋 변경을 보지 못함', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('shared', 'committed_val')
+    root.create('shared', 'committed_val')
     root.commit()
 
     const sibling1 = root.createNested()
     const sibling2 = root.createNested()
 
-    sibling1.write('s1_key', 's1_val')
+    sibling1.create('s1_key', 's1_val')
     sibling1.write('shared', 'sibling1_val')
 
-    sibling2.write('s2_key', 's2_val')
+    sibling2.create('s2_key', 's2_val')
     sibling2.write('shared', 'sibling2_val')
 
     // 각 형제는 자신의 값만 보고 상대방의 값은 못 봄
@@ -234,11 +242,11 @@ describe('Strict Snapshot Isolation Tests', () => {
   // 자식 커밋 후 새로 생성된 트랜잭션은 커밋된 값을 봄
   test('커밋 후 새 트랜잭션은 커밋된 값을 봄', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'base_val')
+    root.create('base', 'base_val')
     root.commit()
 
     const tx1 = root.createNested()
-    tx1.write('k1', 'tx1_val')
+    tx1.create('k1', 'tx1_val')
     tx1.commit() // version 2
 
     // 커밋 후 새로운 트랜잭션
@@ -250,20 +258,20 @@ describe('Strict Snapshot Isolation Tests', () => {
   test('5단계 중첩: 최하위가 커밋된 최상위 값만 읽음', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
 
-    root.write('root_key', 'root_val')
+    root.create('root_key', 'root_val')
     root.commit() // 영속화
 
     const l1 = root.createNested()
-    l1.write('l1_key', 'l1_val')
+    l1.create('l1_key', 'l1_val')
 
     const l2 = l1.createNested()
-    l2.write('l2_key', 'l2_val')
+    l2.create('l2_key', 'l2_val')
 
     const l3 = l2.createNested()
-    l3.write('l3_key', 'l3_val')
+    l3.create('l3_key', 'l3_val')
 
     const l4 = l3.createNested()
-    l4.write('l4_key', 'l4_val')
+    l4.create('l4_key', 'l4_val')
 
     const l5 = l4.createNested()
 
@@ -278,7 +286,7 @@ describe('Strict Snapshot Isolation Tests', () => {
   // 롤백 후에도 커밋된 스냅샷은 유지됨
   test('자식 롤백 후에도 커밋된 스냅샷 유지', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'committed_v1')
+    root.create('k1', 'committed_v1')
     root.commit()
 
     const child1 = root.createNested()
@@ -296,7 +304,7 @@ describe('Strict Snapshot Isolation Tests', () => {
     const strategy = new InMemoryStrategy()
     const root = new TestRootTransaction(strategy)
 
-    root.write('key', 'root')
+    root.create('key', 'root')
     root.commit()
 
     const l1 = root.createNested()
@@ -333,17 +341,17 @@ describe('Key Conflict Detection Tests', () => {
   // 같은 키를 부모와 자식이 수정하면 충돌
   test('같은 키 수정 시 충돌 발생', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'initial')
+    root.create('k1', 'initial')
     root.commit()
 
     const parent = root.createNested()
     const child = parent.createNested() // snapshotLocalVersion 기록
 
     // 자식 생성 후 부모가 같은 키를 수정
-    parent.write('A', 'parent_value')
+    parent.create('A', 'parent_value')
 
     // 자식도 같은 키를 수정
-    child.write('A', 'child_value')
+    child.create('A', 'child_value')
 
     // 자식 커밋 시 충돌 발생
     expect(() => child.commit()).toThrow(/conflict/i)
@@ -352,17 +360,17 @@ describe('Key Conflict Detection Tests', () => {
   // 다른 키를 수정하면 충돌 없음
   test('다른 키 수정 시 충돌 없음', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'initial')
+    root.create('k1', 'initial')
     root.commit()
 
     const parent = root.createNested()
     const child = parent.createNested()
 
     // 부모는 'B' 키 수정
-    parent.write('B', 'parent_value')
+    parent.create('B', 'parent_value')
 
     // 자식은 'A' 키 수정
-    child.write('A', 'child_value')
+    child.create('A', 'child_value')
 
     // 충돌 없이 정상 커밋
     expect(() => child.commit()).not.toThrow()
@@ -372,7 +380,7 @@ describe('Key Conflict Detection Tests', () => {
   // 3단계 중첩: c에서 수정, b에서 수정 시 충돌
   test('3단계 중첩: a-b-c에서 b와 c가 같은 키 수정 시 충돌', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
@@ -380,10 +388,10 @@ describe('Key Conflict Detection Tests', () => {
     const c = b.createNested()
 
     // c 생성 후 b가 같은 키를 수정
-    b.write('shared', 'b_value')
+    b.create('shared', 'b_value')
 
     // c도 같은 키를 수정
-    c.write('shared', 'c_value')
+    c.create('shared', 'c_value')
 
     // c 커밋 시 충돌
     expect(() => c.commit()).toThrow(/conflict.*shared/i)
@@ -392,7 +400,7 @@ describe('Key Conflict Detection Tests', () => {
   // 3단계 중첩: c에서 수정, b에서 다른 키 수정 시 충돌 없음
   test('3단계 중첩: a-b-c에서 b와 c가 다른 키 수정 시 충돌 없음', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
@@ -400,10 +408,10 @@ describe('Key Conflict Detection Tests', () => {
     const c = b.createNested()
 
     // b는 'B' 키 수정
-    b.write('B', 'b_value')
+    b.create('B', 'b_value')
 
     // c는 'C' 키 수정
-    c.write('C', 'c_value')
+    c.create('C', 'c_value')
 
     // 충돌 없이 커밋
     expect(() => c.commit()).not.toThrow()
@@ -414,7 +422,7 @@ describe('Key Conflict Detection Tests', () => {
   // 형제 트랜잭션 간 같은 키 수정 시 충돌
   test('형제 트랜잭션 간 같은 키 수정: 선 커밋자가 승리', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'initial')
+    root.create('k1', 'initial')
     root.commit()
 
     const parent = root.createNested()
@@ -423,8 +431,8 @@ describe('Key Conflict Detection Tests', () => {
     const sibling2 = parent.createNested()
 
     // 양쪽 모두 같은 키 수정
-    sibling1.write('shared', 'sibling1_val')
-    sibling2.write('shared', 'sibling2_val')
+    sibling1.create('shared', 'sibling1_val')
+    sibling2.create('shared', 'sibling2_val')
 
     // sibling1 먼저 커밋 - 성공
     expect(() => sibling1.commit()).not.toThrow()
@@ -436,7 +444,7 @@ describe('Key Conflict Detection Tests', () => {
   // 형제 트랜잭션 간 다른 키 수정 시 충돌 없음
   test('형제 트랜잭션 간 다른 키 수정: 모두 성공', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'initial')
+    root.create('k1', 'initial')
     root.commit()
 
     const parent = root.createNested()
@@ -445,8 +453,8 @@ describe('Key Conflict Detection Tests', () => {
     const sibling2 = parent.createNested()
 
     // 각자 다른 키 수정
-    sibling1.write('key1', 'sibling1_val')
-    sibling2.write('key2', 'sibling2_val')
+    sibling1.create('key1', 'sibling1_val')
+    sibling2.create('key2', 'sibling2_val')
 
     // 둘 다 성공적으로 커밋
     expect(() => sibling1.commit()).not.toThrow()
@@ -459,7 +467,7 @@ describe('Key Conflict Detection Tests', () => {
   // delete와 write 충돌
   test('delete와 write 충돌: 같은 키에서 충돌', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('target', 'initial')
+    root.create('target', 'initial')
     root.commit()
 
     const parent = root.createNested()
@@ -478,7 +486,7 @@ describe('Key Conflict Detection Tests', () => {
   // TransactionResult 반환값 테스트
   test('commit 결과: created, updated, deleted 구분', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('existing', 'v1')
+    root.create('existing', 'v1')
     root.commit()
 
     const tx = root.createNested()
@@ -490,8 +498,8 @@ describe('Key Conflict Detection Tests', () => {
     const result = tx.commit()
 
     expect(result.success).toBe(true)
-    expect(result.created).toContain('another_new')
-    expect(result.deleted).toContain('existing')
+    expect(hasKey(result.created, 'another_new')).toBe(true)
+    expect(hasKey(result.deleted, 'existing')).toBe(true)
     // 'new_key'는 create 후 delete하지 않았지만 existing은 delete됨
     expect(result.updated).toEqual([])
   })
@@ -499,7 +507,7 @@ describe('Key Conflict Detection Tests', () => {
   // rollback 결과 테스트
   test('rollback 결과: 버퍼에 있던 키 반환', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('k1', 'v1')
+    root.create('k1', 'v1')
     root.commit()
 
     const tx = root.createNested()
@@ -510,14 +518,14 @@ describe('Key Conflict Detection Tests', () => {
     const result = tx.rollback()
 
     expect(result.success).toBe(true)
-    expect(result.created).toContain('created_key')
-    expect(result.deleted).toContain('k1')
+    expect(hasKey(result.created, 'created_key')).toBe(true)
+    expect(hasKey(result.deleted, 'k1')).toBe(true)
   })
 
   // 부모 커밋 시 자식 변경사항 누적
   test('a-b-c: c 커밋 후 b 커밋 시 c의 created도 포함', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
@@ -528,23 +536,23 @@ describe('Key Conflict Detection Tests', () => {
     c.create('A', 'c_value')
     const cResult = c.commit()
 
-    expect(cResult.created).toContain('A')
+    expect(hasKey(cResult.created, 'A')).toBe(true)
     expect(cResult.updated).toEqual([])
 
-    // b에서 'B' 키 수정
-    b.write('B', 'b_value')
+    // b에서 'B' 키 생성
+    b.create('B', 'b_value')
     const bResult = b.commit()
 
     // b의 결과에 c의 created 'A'도 포함되어야 함
-    expect(bResult.created).toContain('A')
-    expect(bResult.updated).toContain('B')
+    expect(hasKey(bResult.created, 'A')).toBe(true)
+    expect(hasKey(bResult.created, 'B')).toBe(true)
     expect(bResult.deleted).toEqual([])
   })
 
   // 롤백 시에도 자식 변경사항 누적
   test('a-b-c: c 커밋 후 b 롤백 시 c의 created도 포함', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
@@ -555,21 +563,21 @@ describe('Key Conflict Detection Tests', () => {
     c.create('A', 'c_value')
     c.commit()
 
-    // b에서 'B' 키 수정
-    b.write('B', 'b_value')
+    // b에서 'B' 키 생성
+    b.create('B', 'b_value')
 
     const bResult = b.rollback()
 
     // b의 롤백 결과에 c의 created 'A'도 포함되어야 함
-    expect(bResult.created).toContain('A')
-    expect(bResult.updated).toContain('B')
+    expect(hasKey(bResult.created, 'A')).toBe(true)
+    expect(hasKey(bResult.created, 'B')).toBe(true)
     expect(bResult.deleted).toEqual([])
   })
 
   // 4단계 누적: a-b-c-d에서 d->c->b 순서로 커밋
   test('4단계 누적: d->c->b 커밋 시 모든 created 누적', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
@@ -587,15 +595,15 @@ describe('Key Conflict Detection Tests', () => {
     const bResult = b.commit()
 
     // b의 결과에 d, c, b의 created 모두 포함
-    expect(bResult.created).toContain('D')
-    expect(bResult.created).toContain('C')
-    expect(bResult.created).toContain('B')
+    expect(hasKey(bResult.created, 'D')).toBe(true)
+    expect(hasKey(bResult.created, 'C')).toBe(true)
+    expect(hasKey(bResult.created, 'B')).toBe(true)
   })
 
   // 자식이 삭제한 키는 부모 created에서 제외
   test('자식이 create 후 삭제하면 부모 created에서 제외', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
@@ -606,60 +614,60 @@ describe('Key Conflict Detection Tests', () => {
     c.delete('temp')  // 바로 삭제
     c.commit()
 
-    b.write('B', 'b_value')
+    b.create('B', 'b_value')
     const bResult = b.commit()
 
     // 'temp'는 create 후 delete되었으므로 created에 없어야 함
-    expect(bResult.created).not.toContain('temp')
+    expect(hasKey(bResult.created, 'temp')).toBe(false)
     // 대신 deleted에 있을 수 있음
-    expect(bResult.deleted).toContain('temp')
+    expect(hasKey(bResult.deleted, 'temp')).toBe(true)
   })
 
   // b에서 먼저 수정 후 c 생성/커밋 시에도 동일한 결과
   test('b 먼저 수정 → c 생성/커밋 → b 커밋: 순서 무관하게 동일 결과', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
     const b = a.createNested()
 
-    // b에서 먼저 수정
-    b.write('B', 'b_value')
+    // b에서 먼저 생성
+    b.create('B', 'b_value')
 
     // 그 다음 c 생성
     const c = b.createNested()
     c.create('A', 'c_value')
     const cResult = c.commit()
 
-    expect(cResult.created).toContain('A')
+    expect(hasKey(cResult.created, 'A')).toBe(true)
 
     // b 커밋
     const bResult = b.commit()
 
     // 순서에 관계없이 동일한 결과
-    expect(bResult.created).toContain('A')
-    expect(bResult.updated).toContain('B')
+    expect(hasKey(bResult.created, 'A')).toBe(true)
+    expect(hasKey(bResult.created, 'B')).toBe(true)
     expect(bResult.deleted).toEqual([])
   })
 
   // 복잡한 순서: b 수정 → c 생성 → b 추가 수정 → c 커밋 → b 커밋
   test('복잡한 순서에서도 정확한 결과 반환', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
     const b = a.createNested()
 
-    // 1. b에서 'B1' 수정
-    b.write('B1', 'b1_value')
+    // 1. b에서 'B1' 생성
+    b.create('B1', 'b1_value')
 
     // 2. c 생성
     const c = b.createNested()
 
-    // 3. b에서 'B2' 추가 수정 (c 생성 후)
-    b.write('B2', 'b2_value')
+    // 3. b에서 'B2' 추가 생성 (c 생성 후)
+    b.create('B2', 'b2_value')
 
     // 4. c에서 'A' 생성 및 커밋
     c.create('A', 'c_value')
@@ -669,16 +677,16 @@ describe('Key Conflict Detection Tests', () => {
     const bResult = b.commit()
 
     // A는 created (c에서 생성)
-    expect(bResult.created).toContain('A')
-    // B1, B2는 updated (b에서 write)
-    expect(bResult.updated).toContain('B1')
-    expect(bResult.updated).toContain('B2')
+    expect(hasKey(bResult.created, 'A')).toBe(true)
+    // B1, B2도 created (b에서 create)
+    expect(hasKey(bResult.created, 'B1')).toBe(true)
+    expect(hasKey(bResult.created, 'B2')).toBe(true)
   })
 
   // 자식 롤백 시 부모에게 전달되지 않음
   test('c 롤백 → b 커밋: c의 변경사항이 b 결과에 포함되지 않음', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const a = root.createNested()
@@ -690,15 +698,15 @@ describe('Key Conflict Detection Tests', () => {
     const cRollbackResult = c.rollback()
 
     // c의 롤백 결과에는 'A'가 있음
-    expect(cRollbackResult.created).toContain('A')
+    expect(hasKey(cRollbackResult.created, 'A')).toBe(true)
 
     // b에서 'B' 생성 후 커밋
     b.create('B', 'b_value')
     const bResult = b.commit()
 
     // b의 결과에는 c의 'A'가 없어야 함 (롤백됨)
-    expect(bResult.created).toContain('B')
-    expect(bResult.created).not.toContain('A')
+    expect(hasKey(bResult.created, 'B')).toBe(true)
+    expect(hasKey(bResult.created, 'A')).toBe(false)
     expect(bResult.updated).toEqual([])
     expect(bResult.deleted).toEqual([])
   })
@@ -706,7 +714,7 @@ describe('Key Conflict Detection Tests', () => {
   // 여러 자식 중 일부만 롤백
   test('형제 중 일부 롤백: 커밋된 형제만 부모에 반영', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
-    root.write('base', 'v1')
+    root.create('base', 'v1')
     root.commit()
 
     const parent = root.createNested()
@@ -728,9 +736,9 @@ describe('Key Conflict Detection Tests', () => {
     const parentResult = parent.commit()
 
     // C1, C3, P는 포함, C2는 미포함
-    expect(parentResult.created).toContain('C1')
-    expect(parentResult.created).not.toContain('C2')
-    expect(parentResult.created).toContain('C3')
-    expect(parentResult.created).toContain('P')
+    expect(hasKey(parentResult.created, 'C1')).toBe(true)
+    expect(hasKey(parentResult.created, 'C2')).toBe(false)
+    expect(hasKey(parentResult.created, 'C3')).toBe(true)
+    expect(hasKey(parentResult.created, 'P')).toBe(true)
   })
 })
