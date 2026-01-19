@@ -16,37 +16,43 @@ This library provides a robust framework for implementing Snapshot Isolation (SI
 
 ## Installation
 
+### Node.js
+
 ```bash
 npm install mvcc-api
+```
+
+### ES Module
+
+```javascript
+import {
+  AsyncMVCCManager,
+  AsyncMVCCStrategy
+} from 'https://cdn.jsdelivr.net/npm/mvcc-api@1/+esm'
 ```
 
 ## Usage
 
 ### 1. Implement a Strategy
 
-First, you need to define how data is stored by extending `MVCCStrategy`. Here is a simple example using Node.js `fs/promises`.
+First, you need to define how data is stored by extending `MVCCStrategy`. Here is a simple example using Node.js `node:fs`.
 
 ```typescript
-import fs from 'node:fs/promises'
+import fs from 'node:fs'
 import { AsyncMVCCStrategy } from 'mvcc-api'
 
-export class AsyncFileStrategy extends AsyncMVCCStrategy<string> {
+export class AsyncFileStrategy extends AsyncMVCCStrategy<string, string> {
   async read(key: string): Promise<string> {
-    return fs.readFile(key, 'utf-8')
+    return fs.promises.readFile(key, 'utf-8')
   }
   async write(key: string, value: string): Promise<void> {
-    await fs.writeFile(key, value, 'utf-8')
+    await fs.promises.writeFile(key, value, 'utf-8')
   }
   async delete(key: string): Promise<void> {
-    await fs.unlink(key)
+    await fs.promises.unlink(key)
   }
   async exists(key: string): Promise<boolean> {
-    try {
-      await fs.access(key)
-      return true
-    } catch {
-      return false
-    }
+    return fs.existsSync(key)
   }
 }
 ```
@@ -68,10 +74,10 @@ async function main() {
 
   try {
     // Write data (buffered in memory)
-    tx.write('user:1', JSON.stringify({ name: 'Alice', balance: 100 }))
+    tx.write('user-1.json', JSON.stringify({ name: 'Alice', balance: 100 }))
 
     // Read data (snapshot isolation)
-    const data = await tx.read('user:1')
+    const data = await tx.read('user-1.json')
     console.log('Read within tx:', data) 
 
     // Commit changes to storage
@@ -136,20 +142,20 @@ sequenceDiagram
 
 ## API Reference
 
-### `MVCCStrategy<T>` (Abstract)
-- `read(key: string): Deferred<T>`
-- `write(key: string, value: T): Deferred<void>`
-- `delete(key: string): Deferred<void>`
-- `exists(key: string): Deferred<boolean>`
+### `MVCCStrategy<K, T>` (Abstract)
+- `read(key: K): Deferred<T>`
+- `write(key: K, value: T): Deferred<void>`
+- `delete(key: K): Deferred<void>`
+- `exists(key: K): Deferred<boolean>`
 
-### `MVCCManager<T, S>`
+### `MVCCManager<S, K, T>`
 - `createTransaction(): Transaction`
 - `version`: Current global version.
 
-### `MVCCTransaction<T>`
-- `read(key: string): Deferred<T | null>`
-- `write(key: string, value: T): this`
-- `delete(key: string): this`
+### `MVCCTransaction<S, K, T>`
+- `read(key: K): Deferred<T | null>`
+- `write(key: K, value: T): this`
+- `delete(key: K): this`
 - `commit(): Deferred<this>`
 - `rollback(): this`
 
