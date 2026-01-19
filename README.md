@@ -1,3 +1,6 @@
+[![](https://data.jsdelivr.com/v1/package/npm/mvcc-api/badge)](https://www.jsdelivr.com/package/npm/mvcc-api)
+![Node.js workflow](https://github.com/izure1/mvcc-api/actions/workflows/node.js.yml/badge.svg)
+
 # mvcc-api
 
 Multiversion Concurrency Control (MVCC) API for TypeScript.
