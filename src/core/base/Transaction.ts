@@ -18,7 +18,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
 
   // Nested Transaction Properties
   readonly parent?: MVCCTransaction<S, K, T>
-  readonly localVersion: number // Local version for Nested Conflict Detection
+  public localVersion: number // Local version for Nested Conflict Detection
   readonly keyVersions: Map<K, number> // Key -> Local Version (When it was modified locally)
 
   // Root Transaction Properties (Only populated if this is Root)
@@ -78,8 +78,10 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    */
   write(key: K, value: T): this {
     if (this.committed) throw new Error('Transaction already committed')
+    this.localVersion++
     this.writeBuffer.set(key, value)
     this.deleteBuffer.delete(key)
+    this.keyVersions.set(key, this.localVersion)
     return this
   }
 
@@ -90,8 +92,10 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    */
   delete(key: K): this {
     if (this.committed) throw new Error('Transaction already committed')
+    this.localVersion++
     this.deleteBuffer.add(key)
     this.writeBuffer.delete(key)
+    this.keyVersions.set(key, this.localVersion)
     return this
   }
 
@@ -144,7 +148,8 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    * Reads a value at a specific snapshot version.
    * Used by child transactions to read from parent respecting the child's snapshot.
    * @param key The key to read.
-   * @param snapshotVersion The version to read at.
+   * @param snapshotVersion The global version to read at.
+   * @param snapshotLocalVersion The local version within the parent's buffer to read at.
    */
-  abstract _readSnapshot(key: K, snapshotVersion: number): Deferred<T | null>
+  abstract _readSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Deferred<T | null>
 }

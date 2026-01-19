@@ -28,27 +28,37 @@ export class AsyncMVCCTransaction<
 
   async read(key: K): Promise<T | null> {
     if (this.committed) throw new Error('Transaction already committed')
+    // 1. 자신의 버퍼에서 먼저 확인
     if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
     if (this.deleteBuffer.has(key)) return null
 
-    if (this.parent) {
-      return this.parent._readSnapshot(key, this.snapshotVersion) as Promise<T | null>
-    } else {
-      // Root Logic
-      return this._diskRead(key, this.version)
-    }
+    // 2. 자식 트랜잭션은 부모의 미커밋 버퍼를 볼 수 없음
+    //    오직 커밋된 데이터(디스크)만 볼 수 있음
+    return (this.root as any)._diskRead(key, this.snapshotVersion)
   }
 
-  async _readSnapshot(key: K, snapshotVersion: number): Promise<T | null> {
-    if (this.committed) throw new Error('Transaction already committed')
+  async _readSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Promise<T | null> {
+    // 커밋된 root라도 디스크 읽기는 가능해야 함 (자식 트랜잭션이 읽기 가능)
 
-    if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
-    if (this.deleteBuffer.has(key)) return null
+    // 버퍼에서 읽을 때는 snapshotLocalVersion 이전의 변경만 볼 수 있음
+    if (this.writeBuffer.has(key)) {
+      const keyModVersion = this.keyVersions.get(key)
+      if (snapshotLocalVersion === undefined || keyModVersion === undefined || keyModVersion <= snapshotLocalVersion) {
+        return this.writeBuffer.get(key)!
+      }
+    }
+
+    if (this.deleteBuffer.has(key)) {
+      const keyModVersion = this.keyVersions.get(key)
+      if (snapshotLocalVersion === undefined || keyModVersion === undefined || keyModVersion <= snapshotLocalVersion) {
+        return null
+      }
+    }
 
     if (this.parent) {
-      return this.parent._readSnapshot(key, snapshotVersion) as Promise<T | null>
+      return this.parent._readSnapshot(key, snapshotVersion, this.snapshotLocalVersion) as Promise<T | null>
     } else {
-      // Root Logic
+      // Root Logic: 디스크에서 읽기
       return this._diskRead(key, snapshotVersion)
     }
   }
@@ -59,15 +69,19 @@ export class AsyncMVCCTransaction<
 
       if (this.parent) {
         await this.parent._merge(this)
+        this.committed = true // Nested 트랜잭션은 커밋 후 사용 불가
       } else {
+        // Root Logic: 커밋 후에도 계속 사용 가능
         if (this.writeBuffer.size > 0 || this.deleteBuffer.size > 0) {
           await this._merge(this)
           this.writeBuffer.clear()
           this.deleteBuffer.clear()
+          this.keyVersions.clear()
+          this.localVersion = 0
         }
+        // root는 committed를 true로 설정하지 않음 - 재사용 가능
       }
 
-      this.committed = true
       return this
     })
   }
