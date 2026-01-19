@@ -112,33 +112,20 @@ export class SyncMVCCTransaction<
   }
 
   commit(): TransactionResult<K, T> {
+    const { created, updated, deleted } = this._getResultEntries()
+
     if (this.committed) {
-      return { success: false, error: 'Transaction already committed', created: [], updated: [], deleted: [] }
+      return { success: false, error: 'Transaction already committed', created, updated, deleted }
     }
 
-    const created: TransactionEntry<K, T>[] = []
-    const updated: TransactionEntry<K, T>[] = []
-    for (const [key, data] of this.writeBuffer.entries()) {
-      if (this.createdKeys.has(key)) {
-        created.push({ key, data })
-      } else {
-        updated.push({ key, data })
-      }
-    }
-    const deleted: TransactionEntry<K, T>[] = []
-    for (const key of this.deleteBuffer) {
-      // 원래 디스크에 존재했던 키만 deleted로 보고 (create→delete는 제외)
-      if (!this.originallyExisted.has(key)) continue
-      const data = this.deletedValues.get(key)
-      if (data !== undefined) {
-        deleted.push({ key, data })
-      }
+    if (this.hasCommittedAncestor()) {
+      return { success: false, error: 'Ancestor transaction already committed', created, updated, deleted }
     }
 
     if (this.parent) {
       const error = this.parent._merge(this) as string | null
       if (error) {
-        return { success: false, error, created: [], updated: [], deleted: [] }
+        return { success: false, error, created, updated, deleted }
       }
       this.committed = true // Nested 트랜잭션은 커밋 후 사용 불가
     } else {

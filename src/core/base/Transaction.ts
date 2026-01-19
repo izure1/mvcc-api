@@ -63,6 +63,20 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   }
 
   /**
+   * Checks if any ancestor transaction has already been committed.
+   * A nested transaction cannot commit if its parent or any higher ancestor is committed.
+   * @returns True if at least one ancestor is committed, false otherwise.
+   */
+  hasCommittedAncestor(): boolean {
+    let current: MVCCTransaction<S, K, T> | undefined = this.parent
+    while (current) {
+      if (current.committed) return true
+      current = current.parent
+    }
+    return false
+  }
+
+  /**
    * Schedules a creation (insert) of a key-value pair.
    * Throws if the key already exists.
    * @param key The key to create.
@@ -114,12 +128,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.keyVersions.set(key, this.localVersion)
   }
 
-  /**
-   * Rolls back the transaction.
-   * Clears all buffers and marks the transaction as finished.
-   * @returns The result object with success, created, updated, and deleted keys.
-   */
-  rollback(): TransactionResult<K, T> {
+  protected _getResultEntries(): { created: TransactionEntry<K, T>[], updated: TransactionEntry<K, T>[], deleted: TransactionEntry<K, T>[] } {
     const created: TransactionEntry<K, T>[] = []
     const updated: TransactionEntry<K, T>[] = []
     for (const [key, data] of this.writeBuffer.entries()) {
@@ -131,13 +140,22 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     }
     const deleted: TransactionEntry<K, T>[] = []
     for (const key of this.deleteBuffer) {
-      // 원래 디스크에 존재했던 키만 deleted로 보고 (create→delete는 제외)
       if (!this.originallyExisted.has(key)) continue
       const data = this.deletedValues.get(key)
       if (data !== undefined) {
         deleted.push({ key, data })
       }
     }
+    return { created, updated, deleted }
+  }
+
+  /**
+   * Rolls back the transaction.
+   * Clears all buffers and marks the transaction as finished.
+   * @returns The result object with success, created, updated, and deleted keys.
+   */
+  rollback(): TransactionResult<K, T> {
+    const { created, updated, deleted } = this._getResultEntries()
 
     this.writeBuffer.clear()
     this.deleteBuffer.clear()
