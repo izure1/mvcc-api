@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { SyncMVCCManager } from '../src'
+import { SyncMVCCTransaction } from '../src'
 import { FileStrategy } from './strategy/FileStrategy'
 
 describe('FileSystem MVCC', () => {
@@ -26,18 +26,18 @@ describe('FileSystem MVCC', () => {
   const getPath = (filename: string) => path.join(tmpDir, filename)
 
   test('Scenario 1: Basic Transaction & Snapshot Isolation', () => {
-    const manager = new SyncMVCCManager(new FileStrategy())
+    const root = new SyncMVCCTransaction(new FileStrategy())
 
     // Setup
     const file1 = getPath('file1.txt')
-    const tx0 = manager.createTransaction()
+    const tx0 = root.createNested()
     tx0.create(file1, 'Hello World').commit()
 
     expect(fs.readFileSync(file1, 'utf-8')).toBe('Hello World')
 
     // Isolation
-    const tx1 = manager.createTransaction()
-    const tx2 = manager.createTransaction()
+    const tx1 = root.createNested()
+    const tx2 = root.createNested()
 
     expect(tx1.read(file1)).toBe('Hello World')
     expect(tx2.read(file1)).toBe('Hello World')
@@ -48,18 +48,18 @@ describe('FileSystem MVCC', () => {
 
     tx2.commit()
 
-    const tx3 = manager.createTransaction()
+    const tx3 = root.createNested()
     expect(tx3.read(file1)).toBeNull()
   })
 
   test('Scenario 2: Conflict Detection', () => {
-    const manager = new SyncMVCCManager(new FileStrategy())
+    const root = new SyncMVCCTransaction(new FileStrategy())
     const file2 = getPath('file2.txt')
 
-    manager.createTransaction().create(file2, 'Initial').commit()
+    root.createNested().create(file2, 'Initial').commit()
 
-    const tx3 = manager.createTransaction()
-    const tx4 = manager.createTransaction()
+    const tx3 = root.createNested()
+    const tx4 = root.createNested()
 
     expect(tx3.read(file2)).toBe('Initial')
 
@@ -71,13 +71,13 @@ describe('FileSystem MVCC', () => {
   })
 
   test('Scenario 3: Copy-on-Write', () => {
-    const manager = new SyncMVCCManager(new FileStrategy())
+    const root = new SyncMVCCTransaction(new FileStrategy())
     const file2 = getPath('file2.txt')
 
-    manager.createTransaction().create(file2, 'Version 1').commit()
+    root.createNested().create(file2, 'Version 1').commit()
 
-    const tx5 = manager.createTransaction()
-    const tx6 = manager.createTransaction()
+    const tx5 = root.createNested()
+    const tx6 = root.createNested()
 
     expect(tx5.read(file2)).toBe('Version 1')
 
@@ -91,12 +91,12 @@ describe('FileSystem MVCC', () => {
   })
 
   test('Scenario: Read-Only Transaction Success', () => {
-    const manager = new SyncMVCCManager(new FileStrategy())
+    const root = new SyncMVCCTransaction(new FileStrategy())
     const file = getPath('readonly.txt')
-    manager.createTransaction().create(file, 'v1').commit()
+    root.createNested().create(file, 'v1').commit()
 
-    const txRead = manager.createTransaction()
-    const txWrite = manager.createTransaction()
+    const txRead = root.createNested()
+    const txWrite = root.createNested()
 
     // Read in txRead
     expect(txRead.read(file)).toBe('v1')
@@ -112,12 +112,12 @@ describe('FileSystem MVCC', () => {
   })
 
   test('Scenario: Strict Write-Write Conflict', () => {
-    const manager = new SyncMVCCManager(new FileStrategy())
+    const root = new SyncMVCCTransaction(new FileStrategy())
     const file = getPath('conflict.txt')
-    manager.createTransaction().create(file, 'start').commit()
+    root.createNested().create(file, 'start').commit()
 
-    const tx1 = manager.createTransaction()
-    const tx2 = manager.createTransaction()
+    const tx1 = root.createNested()
+    const tx2 = root.createNested()
 
     tx1.write(file, 'tx1')
     tx2.write(file, 'tx2')
@@ -130,12 +130,12 @@ describe('FileSystem MVCC', () => {
 
   test('Persistence', () => {
     const file3 = getPath('file3.txt')
-    const manager1 = new SyncMVCCManager(new FileStrategy())
-    manager1.createTransaction().create(file3, 'Persistent Data').commit()
+    const root1 = new SyncMVCCTransaction(new FileStrategy())
+    root1.createNested().create(file3, 'Persistent Data').commit()
 
-    // New Manager instance should see data
-    const manager2 = new SyncMVCCManager(new FileStrategy())
-    const tx = manager2.createTransaction()
+    // New Root instance should see data
+    const root2 = new SyncMVCCTransaction(new FileStrategy())
+    const tx = root2.createNested()
 
     expect(tx.read(file3)).toBe('Persistent Data')
   })

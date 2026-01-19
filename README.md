@@ -5,14 +5,15 @@
 
 Multiversion Concurrency Control (MVCC) API for TypeScript.
 
-This library provides a robust framework for implementing Snapshot Isolation (SI) using MVCC. It supports both synchronous and asynchronous operations and is designed to be storage-agnostic via the Strategy pattern.
+This library provides a robust framework for implementing Snapshot Isolation (SI) using MVCC. It supports both synchronous and asynchronous operations and features a flexible nested transaction system.
 
 ## Features
 
 - **MVCC (Multiversion Concurrency Control)**: Provides Snapshot Isolation, allowing readers to not block writers and vice versa.
-- **Sync & Async Support**: Separate `SyncMVCCManager` and `AsyncMVCCManager` for different use cases.
-- **Storage Agnostic**: Implement your own `Strategy` (e.g., File System, In-Memory, Key-Value Store) to handle actual data persistence.
-- **Transaction Management**: Methods to `create`, `commit`, and `rollback` transactions easily.
+- **Unified Transaction Architecture**: Root and Nested transactions share the same API, simplifying complex workflows.
+- **Indefinite Nesting**: Create child transactions from any existing transaction with proper conflict detection.
+- **Storage Agnostic**: Implement your own `Strategy` (e.g., File System, In-Memory, Key-Value Store) via the Strategy pattern.
+- **Sync & Async Support**: Optimized implementations for both synchronous and asynchronous environments.
 
 ## Installation
 
@@ -22,11 +23,11 @@ This library provides a robust framework for implementing Snapshot Isolation (SI
 npm install mvcc-api
 ```
 
-### ES Module
+### ES Module (via CDN)
 
 ```javascript
 import {
-  AsyncMVCCManager,
+  AsyncMVCCTransaction,
   AsyncMVCCStrategy
 } from 'https://cdn.jsdelivr.net/npm/mvcc-api@1/+esm'
 ```
@@ -35,7 +36,7 @@ import {
 
 ### 1. Implement a Strategy
 
-First, you need to define how data is stored by extending `MVCCStrategy`. Here is a simple example using Node.js `node:fs`.
+Define how data is stored by extending `MVCCStrategy`.
 
 ```typescript
 import fs from 'node:fs'
@@ -59,105 +60,70 @@ export class AsyncFileStrategy extends AsyncMVCCStrategy<string, string> {
 
 ### 2. Run Transactions
 
-Initialize the Manager with your Strategy and start using transactions.
+Initialize a root transaction with your strategy. You can then create nested transactions for isolated work.
 
 ```typescript
-import { AsyncMVCCManager } from 'mvcc-api'
-import { AsyncFileStrategy } from './AsyncFileStrategy' // Your strategy
+import { AsyncMVCCTransaction } from 'mvcc-api'
+import { AsyncFileStrategy } from './AsyncFileStrategy'
 
 async function main() {
   const strategy = new AsyncFileStrategy()
-  const db = new AsyncMVCCManager(strategy)
+  // Create a Root Transaction
+  const root = new AsyncMVCCTransaction(strategy)
 
-  // Start a transaction
-  const tx = db.createTransaction()
+  // Start a Nested Transaction for isolated work
+  const tx = root.createNested()
 
   try {
-    // Write data (buffered in memory)
-    tx.write('user-1.json', JSON.stringify({ name: 'Alice', balance: 100 }))
-
-    // Read data (snapshot isolation)
-    const data = await tx.read('user-1.json')
-    console.log('Read within tx:', data) 
-
-    // Commit changes to storage
+    tx.write('data.json', JSON.stringify({ status: 'active' }))
+    
+    // Reads see local changes + snapshot from parent
+    const data = await tx.read('data.json')
+    
+    // Commit merges changes up to the parent (Root in this case)
     await tx.commit()
-    console.log('Transaction committed!')
   } catch (err) {
-    console.error('Transaction failed:', err)
     tx.rollback()
   }
 }
-
-main()
 ```
 
 ## Architecture
 
-The follow diagram illustrates the flow of a transaction in `mvcc-api`.
+The unified architecture allows transactions to interact with storage (Root) or their parent (Nested) through a consistent interface.
 
 ```mermaid
-sequenceDiagram
-    participant App
-    participant Manager
-    participant Transaction
-    participant Strategy
-    
-    Note over App, Manager: Initialization
-    App->>Manager: new Manager(Strategy)
-    
-    Note over App, Transaction: Start Transaction
-    App->>Manager: createTransaction()
-    Manager-->>Transaction: new(snapshotVersion)
-    Manager-->>App: tx instance
-    
-    Note over App, Transaction: Operations
-    App->>Transaction: read(key)
-    Transaction->>Manager: _diskRead(key, snapshotVersion)
-    Manager->>Manager: Check Version Index / Cache
-    alt Data in Cache/Index
-        Manager-->>Transaction: Return visible version
-    else Data in Strategy
-        Manager->>Strategy: read(key)
-        Strategy-->>Manager: data
-        Manager-->>Transaction: data
+graph TD
+    subgraph "Transaction Hierarchy"
+        Root["Root Transaction (Has Strategy)"]
+        Nested1["Nested Transaction A"]
+        Nested2["Nested Transaction B"]
+        Root --> Nested1
+        Root --> Nested2
+        Nested1 --> SubNested["Sub-Nested Transaction"]
     end
-    
-    App->>Transaction: write(key, value)
-    Transaction-->>Transaction: Buffer write (In-Memory)
-    
-    Note over App, Strategy: Commit Phase
-    App->>Transaction: commit()
-    Transaction->>Manager: _commit(tx)
-    Manager->>Manager: Check Conflicts (Optimistic Lock)
-    alt Conflict Detected
-        Manager-->>App: Throw Error
-    else No Config
-        Manager->>Strategy: write(key, value)
-        Strategy-->>Manager: success
-        Manager->>Manager: Update Version Index
-        Manager-->>App: Success
-    end
+    Root --> Storage[("External Storage (Strategy)")]
 ```
 
 ## API Reference
 
+### `MVCCTransaction<S, K, T>` (Sync/Async)
+The core class for all transaction operations.
+
+- **Constructor**: `new SyncMVCCTransaction(strategy?)` or `new AsyncMVCCTransaction(strategy?)`
+  - Pass a `strategy` only for the Root transaction.
+- `read(key: K)`: Reads value from local buffer or snapshot.
+- `write(key: K, value: T)`: Buffers a write operation.
+- `delete(key: K)`: Buffers a delete operation.
+- `commit()`: Merges changes to parent or persists if Root.
+- `rollback()`: Discards all local changes.
+- `createNested()`: Creates a new child transaction from the current one.
+
 ### `MVCCStrategy<K, T>` (Abstract)
-- `read(key: K): Deferred<T>`
-- `write(key: K, value: T): Deferred<void>`
-- `delete(key: K): Deferred<void>`
-- `exists(key: K): Deferred<boolean>`
-
-### `MVCCManager<S, K, T>`
-- `createTransaction(): Transaction`
-- `version`: Current global version.
-
-### `MVCCTransaction<S, K, T>`
-- `read(key: K): Deferred<T | null>`
-- `write(key: K, value: T): this`
-- `delete(key: K): this`
-- `commit(): Deferred<this>`
-- `rollback(): this`
+- `read(key: K)`
+- `write(key: K, value: T)`
+- `delete(key: K)`
+- `exists(key: K)`
 
 ## License
 

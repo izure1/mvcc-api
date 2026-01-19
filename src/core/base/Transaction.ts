@@ -1,29 +1,56 @@
 import type { Deferred } from '../../types'
-import type { MVCCManager } from './Manager'
 import type { MVCCStrategy } from './Strategy'
 
 /**
  * MVCC Transaction abstract class.
  * Represents a logical unit of work that isolates changes until commit.
- * It manages its own write/delete buffers and enforces Snapshot Isolation.
- * @template S The strategy type used by the manager.
+ * It can be a RootTransaction (interacting with storage) or a NestedTransaction (interacting with parent).
+ * @template S The strategy type used by the root transaction.
  * @template K The type of key used for data storage (e.g., string).
  * @template T The type of data stored (e.g., string, Buffer, object).
- * @template M The manager type that created this transaction.
  */
-export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T, M extends MVCCManager<S, K, T>> {
-  protected readonly manager: M
-  protected committed: boolean
+export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
+  public committed: boolean
   readonly snapshotVersion: number
+  readonly snapshotLocalVersion: number
   readonly writeBuffer: Map<K, T>
   readonly deleteBuffer: Set<K>
 
-  constructor(manager: M, snapshotVersion: number) {
-    this.manager = manager
-    this.snapshotVersion = snapshotVersion
+  // Nested Transaction Properties
+  readonly parent?: MVCCTransaction<S, K, T>
+  readonly localVersion: number // Local version for Nested Conflict Detection
+  readonly keyVersions: Map<K, number> // Key -> Local Version (When it was modified locally)
+
+  // Root Transaction Properties (Only populated if this is Root)
+  protected strategy?: S
+  protected version: number = 0
+  protected versionIndex: Map<K, Array<{ version: number, exists: boolean }>> = new Map()
+  protected deletedCache: Map<K, Array<{ value: T, deletedAtVersion: number }>> = new Map()
+  protected activeTransactions: Set<MVCCTransaction<S, K, T>> = new Set()
+
+  constructor(strategy?: S, parent?: MVCCTransaction<S, K, T>, snapshotVersion?: number) {
+    this.snapshotVersion = snapshotVersion ?? 0
     this.writeBuffer = new Map()
     this.deleteBuffer = new Set()
     this.committed = false
+    this.parent = parent
+    this.keyVersions = new Map()
+
+    if (parent) {
+      this.localVersion = parent.localVersion
+      this.snapshotLocalVersion = parent.localVersion
+      this.strategy = undefined
+    } else {
+      if (!strategy) throw new Error('Root Transaction must get Strategy')
+      this.strategy = strategy
+      this.version = 0
+      this.localVersion = 0
+      this.snapshotLocalVersion = 0
+    }
+  }
+
+  isRoot(): boolean {
+    return !this.parent
   }
 
   /**
@@ -74,7 +101,6 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T, M exte
     this.writeBuffer.clear()
     this.deleteBuffer.clear()
     this.committed = true
-    this.manager._removeTransaction(this)
     return this
   }
 
@@ -87,8 +113,29 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T, M exte
 
   /**
    * Commits the transaction.
-   * Applies buffered changes to the permanent storage via the manager.
+   * If root, persists to storage.
+   * If nested, merges to parent.
    * @returns The transaction instance.
    */
   abstract commit(): Deferred<this>
+
+  /**
+   * Creates a nested transaction (child) from this transaction.
+   * @returns A new nested transaction instance.
+   */
+  abstract createNested(): MVCCTransaction<S, K, T>
+
+  /**
+   * Merges a child transaction's changes into this transaction.
+   * @param child The committed child transaction.
+   */
+  abstract _merge(child: MVCCTransaction<S, K, T>): Deferred<void>
+
+  /**
+   * Reads a value at a specific snapshot version.
+   * Used by child transactions to read from parent respecting the child's snapshot.
+   * @param key The key to read.
+   * @param snapshotVersion The version to read at.
+   */
+  abstract _readSnapshot(key: K, snapshotVersion: number): Deferred<T | null>
 }

@@ -1,7 +1,6 @@
 import fs from 'node:fs'
-import fsPromises from 'node:fs/promises'
 import path from 'node:path'
-import { AsyncMVCCManager } from '../src'
+import { AsyncMVCCTransaction } from '../src'
 import { AsyncFileStrategy } from './strategy/AsyncFileStrategy'
 
 describe('Strict Async FileSystem MVCC Scenarios', () => {
@@ -27,42 +26,42 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   const getPath = (filename: string) => path.join(tmpDir, filename)
 
   test('Scenario 1: Long Running Reader (Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const historyFile = getPath('history.txt')
 
     // Initial State
-    await (await manager.createTransaction().create(historyFile, 'Generation 0').commit())
+    await (await root.createNested().create(historyFile, 'Generation 0').commit())
 
     // Start Long Running Reader
-    const reader = manager.createTransaction()
+    const reader = root.createNested()
     expect(await reader.read(historyFile)).toBe('Generation 0')
 
     // Perform 50 sequential updates
     for (let i = 1; i <= 50; i++) {
-      const writer = manager.createTransaction()
+      const writer = root.createNested()
       writer.write(historyFile, `Generation ${i}`)
       await writer.commit()
     }
 
     // Current state should be 50
-    expect(await fsPromises.readFile(historyFile, 'utf-8')).toBe('Generation 50')
+    expect(await fs.promises.readFile(historyFile, 'utf-8')).toBe('Generation 50')
 
     // Reader should still see 0 in snapshot
     expect(await reader.read(historyFile)).toBe('Generation 0')
   })
 
   test('Scenario 2: Massive Concurrent Writes (Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
-    const counterFile = getPath('counter.txt')
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
+    const counterFile = getPath('counter.txt');
 
-    await (await manager.createTransaction().create(counterFile, '0').commit())
+    (await root.createNested().create(counterFile, '0').commit())
 
     // Simulate 50 concurrent transactions
-    const txs = Array.from({ length: 50 }, () => manager.createTransaction())
+    const txs = Array.from({ length: 50 }, () => root.createNested())
 
     const results = await Promise.allSettled(txs.map(async (tx, index) => {
       tx.write(counterFile, `${index + 1}`)
-      await tx.commit()
+      return tx.commit()
     }))
 
     const successCount = results.filter(r => r.status === 'fulfilled').length
@@ -74,18 +73,18 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 3: Consistency (Money Transfer Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const accA = getPath('A.txt')
     const accB = getPath('B.txt')
 
-    const initialTx = manager.createTransaction()
+    const initialTx = root.createNested()
     initialTx.create(accA, '100')
     initialTx.create(accB, '0')
     await initialTx.commit()
 
     // Verification Transaction
     const checkConsistency = async () => {
-      const tx = manager.createTransaction()
+      const tx = root.createNested()
       const valA = parseInt((await tx.read(accA)) as string)
       const valB = parseInt((await tx.read(accB)) as string)
       expect(valA + valB).toBe(100)
@@ -95,9 +94,9 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
 
     // Perform 10 transfers sequentially to avoid massive conflicts, but checking consistency concurrently
     for (let i = 0; i < 10; i++) {
-      const observer = manager.createTransaction()
+      const observer = root.createNested()
 
-      const txTransfer = manager.createTransaction()
+      const txTransfer = root.createNested()
       const currentA = parseInt((await txTransfer.read(accA)) as string)
       const currentB = parseInt((await txTransfer.read(accB)) as string)
 
@@ -117,40 +116,40 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   test('Scenario 4: Persistence with Active Transactions (Async)', async () => {
     const tempFile = getPath('atomicity.txt')
 
-    // Manager 1
-    const manager1 = new AsyncMVCCManager(new AsyncFileStrategy())
-    const tx1 = manager1.createTransaction()
+    // Root 1
+    const root1 = new AsyncMVCCTransaction(new AsyncFileStrategy())
+    const tx1 = root1.createNested()
     tx1.create(tempFile, 'In Progress')
 
-    // Manager 2
-    const manager2 = new AsyncMVCCManager(new AsyncFileStrategy())
-    const tx2 = manager2.createTransaction()
+    // Root 2
+    const root2 = new AsyncMVCCTransaction(new AsyncFileStrategy())
+    const tx2 = root2.createNested()
 
     // Should NOT see uncommitted data
     expect(await tx2.read(tempFile)).toBeNull()
     try {
-      await fsPromises.access(tempFile)
+      await fs.promises.access(tempFile)
       fail('File should not exist')
     } catch (e) {
       // Expected
     }
 
     await tx1.commit()
-    expect(await fsPromises.readFile(tempFile, 'utf-8')).toBe('In Progress')
+    expect(await fs.promises.readFile(tempFile, 'utf-8')).toBe('In Progress')
 
-    // Manager 3
-    const manager3 = new AsyncMVCCManager(new AsyncFileStrategy())
-    const tx3 = manager3.createTransaction()
+    // Root 3
+    const root3 = new AsyncMVCCTransaction(new AsyncFileStrategy())
+    const tx3 = root3.createNested()
     expect(await tx3.read(tempFile)).toBe('In Progress')
   })
 
   test('Scenario 5: Read Your Own Writes (Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const file = getPath('own_write.txt')
 
-    await (await manager.createTransaction().create(file, 'Initial').commit())
+    await (await root.createNested().create(file, 'Initial').commit())
 
-    const tx = manager.createTransaction()
+    const tx = root.createNested()
     expect(await tx.read(file)).toBe('Initial')
 
     tx.write(file, 'Modified')
@@ -162,7 +161,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     await tx.commit()
 
     try {
-      await fsPromises.access(file)
+      await fs.promises.access(file)
       fail('File should act be deleted')
     } catch {
       // Expected
@@ -170,103 +169,110 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 6: Delete-Create Cycle (Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const cycleFile = getPath('cycle.txt')
 
-    await (await manager.createTransaction().create(cycleFile, 'V1').commit())
+    await (await root.createNested().create(cycleFile, 'V1').commit())
 
-    const oldReader = manager.createTransaction()
+    const oldReader = root.createNested()
 
-    const deleteTx = manager.createTransaction()
+    const deleteTx = root.createNested()
     deleteTx.delete(cycleFile)
     await deleteTx.commit()
 
-    const createTx = manager.createTransaction()
+    const createTx = root.createNested()
     createTx.create(cycleFile, 'V2')
     await createTx.commit()
 
-    const newReader = manager.createTransaction()
+    const newReader = root.createNested()
 
     expect(await newReader.read(cycleFile)).toBe('V2')
     expect(await oldReader.read(cycleFile)).toBe('V1')
   })
 
   test('Scenario 7: Rollback Integrity (Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const stableFile = getPath('stable.txt')
     const dirtyFile = getPath('dirty.txt')
 
-    await (await manager.createTransaction().create(stableFile, 'Stable').commit())
+    await (await root.createNested().create(stableFile, 'Stable').commit())
 
-    const tx = manager.createTransaction()
+    const tx = root.createNested()
     tx.create(dirtyFile, 'Dirty')
     tx.delete(stableFile)
 
     tx.rollback()
 
     try {
-      await fsPromises.access(dirtyFile)
+      await fs.promises.access(dirtyFile)
       fail('Dirty file should not exist')
     } catch { }
 
-    expect(await fsPromises.readFile(stableFile, 'utf-8')).toBe('Stable')
+    expect(await fs.promises.readFile(stableFile, 'utf-8')).toBe('Stable')
   })
 
   test('Scenario 8: Repeated Read (Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const file = getPath('repeat.txt')
 
-    await (await manager.createTransaction().create(file, 'A').commit())
+    await (await root.createNested().create(file, 'A').commit())
 
-    const observer = manager.createTransaction()
+    const observer = root.createNested()
     expect(await observer.read(file)).toBe('A')
 
-    const tx1 = manager.createTransaction()
+    const tx1 = root.createNested()
     tx1.write(file, 'B')
     await tx1.commit()
     expect(await observer.read(file)).toBe('A')
 
-    const tx2 = manager.createTransaction()
+    const tx2 = root.createNested()
     tx2.write(file, 'C')
     await tx2.commit()
     expect(await observer.read(file)).toBe('A')
   })
 
-  class TestAsyncMVCCManager extends AsyncMVCCManager<AsyncFileStrategy, string, string> {
+  class TestAsyncMVCCTransaction extends AsyncMVCCTransaction<AsyncFileStrategy, string, string> {
     getDeletedCacheSize(): number {
       return this.deletedCache.size
     }
   }
 
   test('Scenario 9: Garbage Collection Logic (Async)', async () => {
-    const manager = new TestAsyncMVCCManager(new AsyncFileStrategy())
+    const root = new TestAsyncMVCCTransaction(new AsyncFileStrategy())
     const file = getPath('gc.txt')
-    await (await manager.createTransaction().create(file, 'Init').commit())
+    await (await root.createNested().create(file, 'Init').commit())
+
+    // Create a reader to HOLD the version
+    const holder = root.createNested()
+    expect(await holder.read(file)).toBe('Init')
 
     for (let i = 0; i < 10; i++) {
-      const tx = manager.createTransaction()
+      const tx = root.createNested()
       tx.write(file, `Update ${i}`)
       await tx.commit()
     }
 
-    expect(manager.getDeletedCacheSize()).toBeGreaterThan(0)
+    expect(root.getDeletedCacheSize()).toBeGreaterThan(0)
 
-    const triggerTx = manager.createTransaction()
+    // Release holder
+    await holder.commit()
+
+    const triggerTx = root.createNested()
     triggerTx.create(getPath('trigger_gc.txt'), 'Trigger')
     await triggerTx.commit()
 
-    expect(manager.getDeletedCacheSize()).toBe(0)
+    expect(root.getDeletedCacheSize()).toBe(0)
   })
 
   test('Scenario 10: Non-Conflicting Parallel Writes (Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
 
     // Setup: 100 Transactions writing to 100 DIFFERENT files.
     // They should ALL succeed because there is no key conflict.
     // The commitments will be serialized by the lock, but no conflict logic should trip.
 
     const count = 100
-    const txs = Array.from({ length: count }, () => manager.createTransaction())
+    const txs = Array.from({ length: count }, () => root.createNested())
 
     const results = await Promise.allSettled(txs.map(async (tx, i) => {
       const file = getPath(`parallel_${i}.txt`)
@@ -282,19 +288,19 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
   })
 
   test('Scenario 11: Mixed Conflict Concurrency (Async)', async () => {
-    const manager = new AsyncMVCCManager(new AsyncFileStrategy())
+    const root = new AsyncMVCCTransaction(new AsyncFileStrategy())
     const fileA = getPath('mixed_A.txt')
     const fileB = getPath('mixed_B.txt')
 
-    await (await manager.createTransaction().create(fileA, '0').commit())
-    await (await manager.createTransaction().create(fileB, '0').commit())
+    await (await root.createNested().create(fileA, '0').commit())
+    await (await root.createNested().create(fileB, '0').commit())
 
     // 50 Txs trying to write A, 50 Txs trying to write B.
     // All start at current version.
     // We expect exactly 1 winner for A and 1 winner for B.
 
-    const txsA = Array.from({ length: 50 }, () => manager.createTransaction())
-    const txsB = Array.from({ length: 50 }, () => manager.createTransaction())
+    const txsA = Array.from({ length: 50 }, () => root.createNested())
+    const txsB = Array.from({ length: 50 }, () => root.createNested())
 
     const allrs = await Promise.allSettled([
       ...txsA.map(async (tx, i) => {

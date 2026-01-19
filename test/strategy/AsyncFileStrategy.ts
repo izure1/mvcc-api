@@ -1,22 +1,20 @@
-import fs from 'node:fs/promises'
-import { AsyncMVCCStrategy } from '../../src/core/async/Strategy'
+import fs from 'node:fs'
+import { AsyncMVCCStrategy } from '../../src'
 
 export class AsyncFileStrategy extends AsyncMVCCStrategy<string, string> {
   async read(key: string): Promise<string> {
-    return fs.readFile(key, 'utf-8')
+    return fs.promises.readFile(key, 'utf-8')
   }
+
   async write(key: string, value: string): Promise<void> {
-    await fs.writeFile(key, value, 'utf-8')
+    await fs.promises.writeFile(key, value, 'utf-8')
   }
+
   async delete(key: string): Promise<void> {
-    await fs.unlink(key)
+    await fs.promises.unlink(key)
   }
+
   async exists(key: string): Promise<boolean> {
-    try {
-      await fs.access(key)
-      return true
-    } catch {
-      return false
-    }
+    return fs.existsSync(key)
   }
 }
