@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "test": "jest",
-    "build": "node build/index.mjs && tsc"
+    "build": "node build/index.js && tsc"
   },
   "keywords": [
     "mvcc",
