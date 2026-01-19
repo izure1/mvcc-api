@@ -74,9 +74,9 @@ import { AsyncMVCCTransaction } from 'mvcc-api'
 const root = new AsyncMVCCTransaction(new FileStrategy())
 const tx = root.createNested()
 
-tx.create('new.json', '{}')        // Create new key
-tx.write('config.json', '{"v":2}') // Update existing key
-tx.delete('old.json')              // Delete key
+await tx.create('new.json', '{}')        // Create new key
+await tx.write('config.json', '{"v":2}') // Update existing key
+await tx.delete('old.json')              // Delete key
 
 const result = await tx.commit()
 // result.created = [{ key: 'new.json', data: '{}' }]
@@ -201,4 +201,5 @@ type TransactionEntry<K, T> = { key: K, data: T }
 Bug reports, feature suggestions, and PRs are always welcome! Please feel free to leave your feedback via GitHub Issues.
 
 ## License
+
 MIT
