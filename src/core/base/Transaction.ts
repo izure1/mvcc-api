@@ -17,6 +17,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   readonly deleteBuffer: Set<K>
   readonly createdKeys: Set<K> // create()로 생성된 키 추적
   readonly deletedValues: Map<K, T> // delete 시 삭제 전 값 저장
+  readonly originallyExisted: Set<K> // 트랜잭션 시작 시점에 디스크에 존재했던 키 (deleted 결과 필터링용)
 
   // Nested Transaction Properties
   readonly parent?: MVCCTransaction<S, K, T>
@@ -37,6 +38,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.deleteBuffer = new Set()
     this.createdKeys = new Set()
     this.deletedValues = new Map()
+    this.originallyExisted = new Set()
     this.committed = false
     this.parent = parent
     this.keyVersions = new Map()
@@ -93,6 +95,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.writeBuffer.set(key, value)
     this.createdKeys.add(key)
     this.deleteBuffer.delete(key)
+    this.originallyExisted.delete(key) // delete 후 create 하면 deleted에서 제외
     this.keyVersions.set(key, this.localVersion)
   }
 
@@ -128,6 +131,8 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     }
     const deleted: TransactionEntry<K, T>[] = []
     for (const key of this.deleteBuffer) {
+      // 원래 디스크에 존재했던 키만 deleted로 보고 (create→delete는 제외)
+      if (!this.originallyExisted.has(key)) continue
       const data = this.deletedValues.get(key)
       if (data !== undefined) {
         deleted.push({ key, data })
@@ -138,6 +143,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.deleteBuffer.clear()
     this.createdKeys.clear()
     this.deletedValues.clear()
+    this.originallyExisted.clear()
     this.committed = true
 
     // Deregister from Root's active transactions for GC

@@ -613,8 +613,8 @@ describe('Key Conflict Detection Tests', () => {
     expect(hasKey(bResult.created, 'B')).toBe(true)
   })
 
-  // 자식이 삭제한 키는 부모 created에서 제외
-  test('자식이 create 후 삭제하면 부모 created에서 제외', () => {
+  // 자식이 삭제한 키는 부모 created, deleted 모두에서 제외
+  test('자식이 create 후 삭제하면 created, deleted 모두에서 제외', () => {
     const root = new TestRootTransaction(new InMemoryStrategy())
     root.create('base', 'v1')
     root.commit()
@@ -630,10 +630,9 @@ describe('Key Conflict Detection Tests', () => {
     b.create('B', 'b_value')
     const bResult = b.commit()
 
-    // 'temp'는 create 후 delete되었으므로 created에 없어야 함
+    // 'temp'는 create 후 delete되었으므로 created에도 deleted에도 없어야 함
     expect(hasKey(bResult.created, 'temp')).toBe(false)
-    // 대신 deleted에 있을 수 있음
-    expect(hasKey(bResult.deleted, 'temp')).toBe(true)
+    expect(hasKey(bResult.deleted, 'temp')).toBe(false)  // 원래 디스크에 없었으므로 deleted에도 없음
   })
 
   // b에서 먼저 수정 후 c 생성/커밋 시에도 동일한 결과

@@ -44,8 +44,10 @@ export class AsyncMVCCTransaction<
     if (this.committed) throw new Error('Transaction already committed')
     // 버퍼에 있으면 그 값을 저장, 아니면 read로 가져옴
     let valueToDelete: T | null = null
+    let wasInWriteBuffer = false
     if (this.writeBuffer.has(key)) {
       valueToDelete = this.writeBuffer.get(key)!
+      wasInWriteBuffer = true
     } else if (!this.deleteBuffer.has(key)) {
       valueToDelete = await this.read(key)
     }
@@ -53,6 +55,11 @@ export class AsyncMVCCTransaction<
       throw new Error(`Key not found: ${key}`)
     }
     this.deletedValues.set(key, valueToDelete)
+    // 디스크에서 읽은 값이거나, write한 값이지만 createdKeys에 없으면 (디스크 값을 수정한 것)
+    // originallyExisted에 추가 (create→delete는 제외)
+    if (!wasInWriteBuffer || !this.createdKeys.has(key)) {
+      this.originallyExisted.add(key)
+    }
     this._bufferDelete(key)
     return this
   }
@@ -129,6 +136,8 @@ export class AsyncMVCCTransaction<
       }
       const deleted: TransactionEntry<K, T>[] = []
       for (const key of this.deleteBuffer) {
+        // 원래 디스크에 존재했던 키만 deleted로 보고 (create→delete는 제외)
+        if (!this.originallyExisted.has(key)) continue
         const data = this.deletedValues.get(key)
         if (data !== undefined) {
           deleted.push({ key, data })
@@ -152,6 +161,7 @@ export class AsyncMVCCTransaction<
           this.deleteBuffer.clear()
           this.createdKeys.clear()
           this.deletedValues.clear()
+          this.originallyExisted.clear()
           this.keyVersions.clear()
           this.localVersion = 0
         }
@@ -200,6 +210,10 @@ export class AsyncMVCCTransaction<
           const deletedValue = child.deletedValues.get(key)
           if (deletedValue !== undefined) {
             this.deletedValues.set(key, deletedValue)
+          }
+          // 자식의 originallyExisted도 부모에게 전달
+          if (child.originallyExisted.has(key)) {
+            this.originallyExisted.add(key)
           }
         }
 
