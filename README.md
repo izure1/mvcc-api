@@ -54,7 +54,7 @@ import {
   SyncMVCCTransaction,
   AsyncMVCCStrategy,
   AsyncMVCCTransaction
-} from 'https://cdn.jsdelivr.net/npm/mvcc-api@7/+esm'
+} from 'https://cdn.jsdelivr.net/npm/mvcc-api@1/+esm'
 ```
 
 ## Usage
