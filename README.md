@@ -202,10 +202,12 @@ const bResult = b.commit()
 
 ```typescript
 type TransactionEntry<K, T> = { key: K, data: T }
+type TransactionConflict<K, T> = { key: K, parent: T, child: T }
 
 {
   success: boolean              // Success status
   error?: string                // Error message on failure (e.g. conflict)
+  conflict?: TransactionConflict<K, T> // Conflict information on failure
   created: TransactionEntry[]   // Keys and values created via create()
   updated: TransactionEntry[]   // Keys and values updated via write()
   deleted: TransactionEntry[]   // Keys deleted via delete() and their previous values
