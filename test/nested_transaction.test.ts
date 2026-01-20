@@ -356,7 +356,7 @@ describe('Key Conflict Detection Tests', () => {
     // 자식 커밋 시 충돌 발생
     const result = child.commit()
     expect(result.success).toBe(false)
-    expect(result.error).toMatch(/conflict/i)
+    expect((result as any).error).toMatch(/conflict/i)
   })
 
   // 다른 키를 수정하면 충돌 없음
@@ -399,7 +399,7 @@ describe('Key Conflict Detection Tests', () => {
     // c 커밋 시 충돌
     const result = c.commit()
     expect(result.success).toBe(false)
-    expect(result.error).toMatch(/conflict.*shared/i)
+    expect((result as any).error).toMatch(/conflict.*shared/i)
   })
 
   // 3단계 중첩: c에서 수정, b에서 다른 키 수정 시 충돌 없음
@@ -447,7 +447,7 @@ describe('Key Conflict Detection Tests', () => {
     // sibling2 커밋 시 충돌 (sibling1이 이미 같은 키를 커밋함)
     const result2 = sibling2.commit()
     expect(result2.success).toBe(false)
-    expect(result2.error).toMatch(/conflict.*shared/i)
+    expect((result2 as any).error).toMatch(/conflict.*shared/i)
   })
 
   // 형제 트랜잭션 간 다른 키 수정 시 충돌 없음
@@ -493,7 +493,7 @@ describe('Key Conflict Detection Tests', () => {
     // 충돌 발생
     const result = child.commit()
     expect(result.success).toBe(false)
-    expect(result.error).toMatch(/conflict.*target/i)
+    expect((result as any).error).toMatch(/conflict.*target/i)
   })
 
   // TransactionResult 반환값 테스트

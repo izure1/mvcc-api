@@ -35,7 +35,7 @@ describe('Ancestor Commit Validation Repro', () => {
 
       // 실패해야 하며, key1 항목을 포함해야 함
       expect(t2Result.success).toBe(false)
-      expect(t2Result.error).toBe('Ancestor transaction already committed')
+      expect((t2Result as any).error).toBe('Ancestor transaction already committed')
       expect(t2Result.created.length).toBe(1)
       expect(t2Result.created[0].key).toBe('key1')
     })
@@ -56,7 +56,7 @@ describe('Ancestor Commit Validation Repro', () => {
       const t3Result = t3.commit()
 
       expect(t3Result.success).toBe(false)
-      expect(t3Result.error).toBe('Ancestor transaction already committed')
+      expect((t3Result as any).error).toBe('Ancestor transaction already committed')
       expect(t3Result.created.length).toBe(1)
     })
   })
@@ -78,7 +78,7 @@ describe('Ancestor Commit Validation Repro', () => {
       const t2Result = await t2.commit()
 
       expect(t2Result.success).toBe(false)
-      expect(t2Result.error).toBe('Ancestor transaction already committed')
+      expect((t2Result as any).error).toBe('Ancestor transaction already committed')
       expect(t2Result.created.length).toBe(1)
       expect(t2Result.created[0].key).toBe('key_async')
     })

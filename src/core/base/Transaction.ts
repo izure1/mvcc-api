@@ -1,4 +1,4 @@
-import type { Deferred, TransactionResult, TransactionEntry } from '../../types'
+import type { Deferred, TransactionResult, TransactionEntry, TransactionMergeFailure } from '../../types'
 import type { MVCCStrategy } from './Strategy'
 
 /**
@@ -190,9 +190,10 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    * Commits the transaction.
    * If root, persists to storage.
    * If nested, merges to parent.
+   * @param label The label for the commit.
    * @returns The result object with success, created, and obsolete keys.
    */
-  abstract commit(): Deferred<TransactionResult<K, T>>
+  abstract commit(label?: string): Deferred<TransactionResult<K, T>>
 
   /**
    * Creates a nested transaction (child) from this transaction.
@@ -205,7 +206,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    * @param child The committed child transaction.
    * @returns Error message if conflict, null if success.
    */
-  abstract _merge(child: MVCCTransaction<S, K, T>): Deferred<string | null>
+  abstract _merge(child: MVCCTransaction<S, K, T>): Deferred<TransactionMergeFailure<K, T> | null>
 
   /**
    * Reads a value at a specific snapshot version.

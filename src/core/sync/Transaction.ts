@@ -1,5 +1,5 @@
 import type { SyncMVCCStrategy } from './Strategy'
-import type { TransactionResult, TransactionEntry } from '../../types'
+import type { TransactionResult, TransactionMergeFailure } from '../../types'
 import { MVCCTransaction } from '../base'
 
 export class SyncMVCCTransaction<
@@ -111,29 +111,61 @@ export class SyncMVCCTransaction<
     }
   }
 
-  commit(): TransactionResult<K, T> {
+  commit(label?: string): TransactionResult<K, T> {
     const { created, updated, deleted } = this._getResultEntries()
 
     if (this.committed) {
-      return { success: false, error: 'Transaction already committed', created, updated, deleted }
+      return {
+        label,
+        success: false,
+        error: 'Transaction already committed',
+        conflict: undefined,
+        created,
+        updated,
+        deleted,
+      }
     }
 
     if (this.hasCommittedAncestor()) {
-      return { success: false, error: 'Ancestor transaction already committed', created, updated, deleted }
+      return {
+        label,
+        success: false,
+        error: 'Ancestor transaction already committed',
+        conflict: undefined,
+        created,
+        updated,
+        deleted,
+      }
     }
 
     if (this.parent) {
-      const error = this.parent._merge(this) as string | null
-      if (error) {
-        return { success: false, error, created, updated, deleted }
+      const failure = this.parent._merge(this) as TransactionMergeFailure<K, T> | null
+      if (failure) {
+        return {
+          label,
+          success: false,
+          error: failure.error,
+          conflict: failure.conflict,
+          created,
+          updated,
+          deleted,
+        }
       }
       this.committed = true // Nested 트랜잭션은 커밋 후 사용 불가
     } else {
       // Root Logic: 커밋 후에도 계속 사용 가능
       if (this.writeBuffer.size > 0 || this.deleteBuffer.size > 0) {
-        const error = this._merge(this) as string | null
-        if (error) {
-          return { success: false, error, created: [], updated: [], deleted: [] }
+        const failure = this._merge(this) as TransactionMergeFailure<K, T> | null
+        if (failure) {
+          return {
+            label,
+            success: false,
+            error: failure.error,
+            conflict: failure.conflict,
+            created: [],
+            updated: [],
+            deleted: [],
+          }
         }
         this.writeBuffer.clear()
         this.deleteBuffer.clear()
@@ -146,23 +178,43 @@ export class SyncMVCCTransaction<
       // root는 committed를 true로 설정하지 않음 - 재사용 가능
     }
 
-    return { success: true, created, updated, deleted }
+    return {
+      label,
+      success: true,
+      created,
+      updated,
+      deleted,
+    }
   }
 
-  _merge(child: MVCCTransaction<S, K, T>): string | null {
+  _merge(child: SyncMVCCTransaction<S, K, T>): TransactionMergeFailure<K, T> | null {
     if (this.parent) {
       // Nested Logic: Merge to self (Parent of Child)
       // 1. Conflict Detection between Siblings (via keyVersions)
       for (const key of child.writeBuffer.keys()) {
         const lastModLocalVer = this.keyVersions.get(key)
         if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
-          return `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`
+          return {
+            error: `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`,
+            conflict: {
+              key,
+              parent: this.read(key) as T,
+              child: child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+            },
+          }
         }
       }
       for (const key of child.deleteBuffer) {
         const lastModLocalVer = this.keyVersions.get(key)
         if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
-          return `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`
+          return {
+            error: `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`,
+            conflict: {
+              key,
+              parent: this.read(key) as T,
+              child: child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+            },
+          }
         }
       }
 
@@ -198,9 +250,6 @@ export class SyncMVCCTransaction<
 
     } else {
       // Root Logic: Persistence
-
-      (this.root as any).activeTransactions.delete(child)
-
       const newVersion = this.version + 1
 
       // 1. Conflict Detection (Global)
@@ -210,7 +259,14 @@ export class SyncMVCCTransaction<
         if (versions && versions.length > 0) {
           const lastVer = versions[versions.length - 1].version
           if (lastVer > child.snapshotVersion) {
-            return `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`
+            return {
+              error: `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`,
+              conflict: {
+                key,
+                parent: this.read(key) as T,
+                child: child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+              },
+            }
           }
         }
       }
@@ -223,7 +279,8 @@ export class SyncMVCCTransaction<
         this._diskDelete(key, newVersion)
       }
 
-      this.version = newVersion
+      this.version = newVersion;
+      (this.root as any).activeTransactions.delete(child)
 
       // 3. Garbage Collection
       this._cleanupDeletedCache()

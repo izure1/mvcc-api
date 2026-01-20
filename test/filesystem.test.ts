@@ -68,7 +68,7 @@ describe('FileSystem MVCC', () => {
     tx3.write(file2, 'Modified by TX3')
     const result = tx3.commit()
     expect(result.success).toBe(false)
-    expect(result.error).toMatch(/Commit conflict/)
+    expect((result as any).error).toMatch(/Commit conflict/)
   })
 
   test('Scenario 3: Copy-on-Write', () => {
@@ -129,7 +129,7 @@ describe('FileSystem MVCC', () => {
     // tx2 must fail
     const result = tx2.commit()
     expect(result.success).toBe(false)
-    expect(result.error).toMatch(/Commit conflict/)
+    expect((result as any).error).toMatch(/Commit conflict/)
   })
 
   test('Persistence', () => {

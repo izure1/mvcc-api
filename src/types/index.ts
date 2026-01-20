@@ -10,9 +10,28 @@ export type TransactionEntry<K, T> = {
   data: T
 }
 
+export type TransactionConflict<K, T> = {
+  key: K
+  parent: T
+  child: T
+}
+
+export type TransactionMergeFailure<K, T> = {
+  error: string
+  conflict: TransactionConflict<K, T>
+}
+
 export type TransactionResult<K, T> = {
-  success: boolean
-  error?: string
+  label?: string
+  success: true
+  created: TransactionEntry<K, T>[]
+  updated: TransactionEntry<K, T>[]
+  deleted: TransactionEntry<K, T>[]
+} | {
+  label?: string
+  success: false
+  error: string
+  conflict?: TransactionConflict<K, T>
   created: TransactionEntry<K, T>[]
   updated: TransactionEntry<K, T>[]
   deleted: TransactionEntry<K, T>[]

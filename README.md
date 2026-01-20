@@ -38,8 +38,23 @@ It easily and powerfully solves complex concurrency problems that are difficult 
 
 ## Installation
 
+### Node.js
+
 ```bash
 npm install mvcc-api
+# or
+npx jsr add @izure/mvcc-api
+```
+
+### Browser
+
+```javascript
+import {
+  SyncMVCCStrategy,
+  SyncMVCCTransaction,
+  AsyncMVCCStrategy,
+  AsyncMVCCTransaction
+} from 'https://cdn.jsdelivr.net/npm/mvcc-api@7/+esm'
 ```
 
 ## Usage
