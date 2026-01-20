@@ -120,87 +120,85 @@ export class AsyncMVCCTransaction<
   }
 
   async commit(label?: string): Promise<TransactionResult<K, T>> {
-    return this.writeLock(async () => {
-      const { created, updated, deleted } = this._getResultEntries()
+    const { created, updated, deleted } = this._getResultEntries()
 
-      if (this.committed) {
+    if (this.committed) {
+      return {
+        label,
+        success: false,
+        error: 'Transaction already committed',
+        conflict: undefined,
+        created,
+        updated,
+        deleted,
+      }
+    }
+
+    if (this.hasCommittedAncestor()) {
+      return {
+        label,
+        success: false,
+        error: 'Ancestor transaction already committed',
+        conflict: undefined,
+        created,
+        updated,
+        deleted,
+      }
+    }
+
+    if (this.parent) {
+      const failure = await this.parent._merge(this)
+      if (failure) {
         return {
           label,
           success: false,
-          error: 'Transaction already committed',
-          conflict: undefined,
+          error: failure.error,
+          conflict: failure.conflict,
           created,
           updated,
           deleted,
         }
       }
-
-      if (this.hasCommittedAncestor()) {
-        return {
-          label,
-          success: false,
-          error: 'Ancestor transaction already committed',
-          conflict: undefined,
-          created,
-          updated,
-          deleted,
-        }
-      }
-
-      if (this.parent) {
-        const failure = await this.parent._merge(this)
+      this.committed = true // Nested 트랜잭션은 커밋 후 사용 불가
+    } else {
+      // Root Logic: 커밋 후에도 계속 사용 가능
+      if (this.writeBuffer.size > 0 || this.deleteBuffer.size > 0) {
+        const failure = await this._merge(this) as TransactionMergeFailure<K, T> | null
         if (failure) {
           return {
             label,
             success: false,
             error: failure.error,
             conflict: failure.conflict,
-            created,
-            updated,
-            deleted,
+            created: [],
+            updated: [],
+            deleted: [],
           }
         }
-        this.committed = true // Nested 트랜잭션은 커밋 후 사용 불가
-      } else {
-        // Root Logic: 커밋 후에도 계속 사용 가능
-        if (this.writeBuffer.size > 0 || this.deleteBuffer.size > 0) {
-          const failure = await this._merge(this) as TransactionMergeFailure<K, T> | null
-          if (failure) {
-            return {
-              label,
-              success: false,
-              error: failure.error,
-              conflict: failure.conflict,
-              created: [],
-              updated: [],
-              deleted: [],
-            }
-          }
-          this.writeBuffer.clear()
-          this.deleteBuffer.clear()
-          this.createdKeys.clear()
-          this.deletedValues.clear()
-          this.originallyExisted.clear()
-          this.keyVersions.clear()
-          this.localVersion = 0
-        }
-        // root는 committed를 true로 설정하지 않음 - 재사용 가능
+        this.writeBuffer.clear()
+        this.deleteBuffer.clear()
+        this.createdKeys.clear()
+        this.deletedValues.clear()
+        this.originallyExisted.clear()
+        this.keyVersions.clear()
+        this.localVersion = 0
       }
+      // root는 committed를 true로 설정하지 않음 - 재사용 가능
+    }
 
-      return {
-        label,
-        success: true,
-        created,
-        updated,
-        deleted,
-      }
-    })
+    return {
+      label,
+      success: true,
+      created,
+      updated,
+      deleted,
+    }
   }
 
   async _merge(child: MVCCTransaction<S, K, T>): Promise<TransactionMergeFailure<K, T> | null> {
     return this.writeLock(async () => {
       if (this.parent) {
-        // Nested Logic: Merge to self (Parent of Child)
+        // Nested Logic: Merge to self (Parent of Child) - no lock needed
         // 1. Conflict Detection between Siblings (via keyVersions)
         for (const key of child.writeBuffer.keys()) {
           const lastModLocalVer = this.keyVersions.get(key)
@@ -259,30 +257,54 @@ export class AsyncMVCCTransaction<
         (this as any).localVersion = newLocalVersion;
         (this.root as any).activeTransactions.delete(child)
 
+        return null
       } else {
-        // Root Logic: Persistence
+        // Root Logic: Persistence - requires writeLock for concurrency
         const newVersion = this.version + 1
 
-        // 1. Conflict Detection (Global)
-        const modifiedKeys = new Set([...child.writeBuffer.keys(), ...child.deleteBuffer])
-        for (const key of modifiedKeys) {
-          const versions = this.versionIndex.get(key)
-          if (versions && versions.length > 0) {
-            const lastVer = versions[versions.length - 1].version
-            if (lastVer > child.snapshotVersion) {
-              return {
-                error: `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`,
-                conflict: {
-                  key,
-                  parent: await this.read(key) as T,
-                  child: await child.read(key) as T,
-                },
+        // 1. Conflict Detection (Global) - skip if merging self (root commit)
+        if (child !== this) {
+          const modifiedKeys = new Set([...child.writeBuffer.keys(), ...child.deleteBuffer])
+          for (const key of modifiedKeys) {
+            const versions = this.versionIndex.get(key)
+            if (versions && versions.length > 0) {
+              const lastVer = versions[versions.length - 1].version
+              if (lastVer > child.snapshotVersion) {
+                return {
+                  error: `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`,
+                  conflict: {
+                    key,
+                    parent: await this.read(key) as T,
+                    child: await child.read(key) as T,
+                  },
+                }
               }
             }
           }
         }
 
-        // 2. Apply changes to Strategy
+        // 2. Merge child buffers to root (for commit result tracking)
+        for (const [key, value] of child.writeBuffer) {
+          this.writeBuffer.set(key, value)
+          this.deleteBuffer.delete(key)
+          if (child.createdKeys.has(key)) {
+            this.createdKeys.add(key)
+          }
+        }
+        for (const key of child.deleteBuffer) {
+          this.deleteBuffer.add(key)
+          this.writeBuffer.delete(key)
+          this.createdKeys.delete(key)
+          const deletedValue = child.deletedValues.get(key)
+          if (deletedValue !== undefined) {
+            this.deletedValues.set(key, deletedValue)
+          }
+          if (child.originallyExisted.has(key)) {
+            this.originallyExisted.add(key)
+          }
+        }
+
+        // 3. Apply changes to Strategy
         for (const [key, value] of child.writeBuffer) {
           await this._diskWrite(key, value, newVersion)
         }
@@ -293,11 +315,11 @@ export class AsyncMVCCTransaction<
         this.version = newVersion;
         (this.root as any).activeTransactions.delete(child)
 
-        // 3. Garbage Collection
+        // 4. Garbage Collection
         this._cleanupDeletedCache()
-      }
 
-      return null
+        return null
+      }
     })
   }
 

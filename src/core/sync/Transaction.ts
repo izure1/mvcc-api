@@ -252,26 +252,49 @@ export class SyncMVCCTransaction<
       // Root Logic: Persistence
       const newVersion = this.version + 1
 
-      // 1. Conflict Detection (Global)
-      const modifiedKeys = new Set([...child.writeBuffer.keys(), ...child.deleteBuffer])
-      for (const key of modifiedKeys) {
-        const versions = this.versionIndex.get(key)
-        if (versions && versions.length > 0) {
-          const lastVer = versions[versions.length - 1].version
-          if (lastVer > child.snapshotVersion) {
-            return {
-              error: `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`,
-              conflict: {
-                key,
-                parent: this.read(key) as T,
-                child: child.read(key) as T,
-              },
+      // 1. Conflict Detection (Global) - skip if merging self (root commit)
+      if (child !== this) {
+        const modifiedKeys = new Set([...child.writeBuffer.keys(), ...child.deleteBuffer])
+        for (const key of modifiedKeys) {
+          const versions = this.versionIndex.get(key)
+          if (versions && versions.length > 0) {
+            const lastVer = versions[versions.length - 1].version
+            if (lastVer > child.snapshotVersion) {
+              return {
+                error: `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`,
+                conflict: {
+                  key,
+                  parent: this.read(key) as T,
+                  child: child.read(key) as T,
+                },
+              }
             }
           }
         }
       }
 
-      // 2. Apply changes to Strategy
+      // 2. Merge child buffers to root (for commit result tracking)
+      for (const [key, value] of child.writeBuffer) {
+        this.writeBuffer.set(key, value)
+        this.deleteBuffer.delete(key)
+        if (child.createdKeys.has(key)) {
+          this.createdKeys.add(key)
+        }
+      }
+      for (const key of child.deleteBuffer) {
+        this.deleteBuffer.add(key)
+        this.writeBuffer.delete(key)
+        this.createdKeys.delete(key)
+        const deletedValue = child.deletedValues.get(key)
+        if (deletedValue !== undefined) {
+          this.deletedValues.set(key, deletedValue)
+        }
+        if (child.originallyExisted.has(key)) {
+          this.originallyExisted.add(key)
+        }
+      }
+
+      // 3. Apply changes to Strategy
       for (const [key, value] of child.writeBuffer) {
         this._diskWrite(key, value, newVersion)
       }
@@ -282,7 +305,7 @@ export class SyncMVCCTransaction<
       this.version = newVersion;
       (this.root as any).activeTransactions.delete(child)
 
-      // 3. Garbage Collection
+      // 4. Garbage Collection
       this._cleanupDeletedCache()
     }
 
