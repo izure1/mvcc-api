@@ -34,7 +34,7 @@ It easily and powerfully solves complex concurrency problems that are difficult 
     *   Business logic and storage logic can be perfectly separated.
 
 4.  **Improved Development Productivity**
-    *   No need to write complex synchronization code yourself; write safe code with just intuitive `api.read()`, `api.write()`, and `commit()`.
+    *   No need to write complex synchronization code yourself; write safe code with just intuitive `api.read()`, `api.write()`, and `api.commit()`.
 
 ## Installation
 
@@ -136,8 +136,9 @@ const child = parent.createNested()
 parent.write('shared', 'parent')  // Parent modifies after child creation
 child.write('shared', 'child')    // Child modifies same key
 
-const result = child.commit()
+const result = child.commit('It should fail')
 if (!result.success) {
+  console.log(result.label) // "It should fail"
   console.log(result.error) // "Commit conflict: Key 'shared' was modified..."
 }
 ```
@@ -189,13 +190,13 @@ const bResult = b.commit()
 
 | Method | Description | Return Value |
 | :--- | :--- | :--- |
-| `create(key, value)` | Create new key-value | `this` |
-| `write(key, value)` | Update existing key | `this` |
-| `delete(key)` | Delete key | `this` |
-| `read(key)` | Read value | `T \| null` |
-| `exists(key)` | Check if key exists | `boolean` |
-| `commit()` | Apply changes | `TransactionResult<K, T>` |
-| `rollback()` | Discard changes | `TransactionResult<K, T>` |
+| `create(key: K, value: T)` | Create new key-value | `this` |
+| `write(key: K, value: T)` | Update existing key | `this` |
+| `delete(key: K)` | Delete key | `this` |
+| `read(key: K)` | Read value | `T \| null` |
+| `exists(key: K)` | Check if key exists | `boolean` |
+| `commit(label?: string)` | Apply changes | `TransactionResult<K, T>` |
+| `rollback(label?: string)` | Discard changes | `TransactionResult<K, T>` |
 | `createNested()` | Create child transaction | `MVCCTransaction` |
 
 ### `TransactionResult<K, T>`
@@ -206,6 +207,7 @@ type TransactionConflict<K, T> = { key: K, parent: T, child: T }
 
 {
   success: boolean              // Success status
+  label?: string                // Label of the transaction
   error?: string                // Error message on failure (e.g. conflict)
   conflict?: TransactionConflict<K, T> // Conflict information on failure
   created: TransactionEntry[]   // Keys and values created via create()
