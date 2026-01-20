@@ -210,7 +210,7 @@ export class AsyncMVCCTransaction<
               conflict: {
                 key,
                 parent: await this.read(key) as T,
-                child: await child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+                child: await child.read(key) as T,
               },
             }
           }
@@ -223,7 +223,7 @@ export class AsyncMVCCTransaction<
               conflict: {
                 key,
                 parent: await this.read(key) as T,
-                child: await child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+                child: await child.read(key) as T,
               },
             }
           }
@@ -275,7 +275,7 @@ export class AsyncMVCCTransaction<
                 conflict: {
                   key,
                   parent: await this.read(key) as T,
-                  child: await child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+                  child: await child.read(key) as T,
                 },
               }
             }
@@ -304,8 +304,8 @@ export class AsyncMVCCTransaction<
   // --- Internal IO Helpers (Root Only) ---
 
   async _diskWrite(key: K, value: T, version: number): Promise<void> {
-    const strategy = this.strategy;
-    if (!strategy) throw new Error('Root Transaction missing strategy');
+    const strategy = this.strategy
+    if (!strategy) throw new Error('Root Transaction missing strategy')
     // Backup for MVCC
     if (await strategy.exists(key)) {
       const currentVal = await strategy.read(key)
@@ -322,8 +322,8 @@ export class AsyncMVCCTransaction<
   }
 
   async _diskRead(key: K, snapshotVersion: number): Promise<T | null> {
-    const strategy = this.strategy;
-    if (!strategy) throw new Error('Root Transaction missing strategy');
+    const strategy = this.strategy
+    if (!strategy) throw new Error('Root Transaction missing strategy')
     const versions = this.versionIndex.get(key)
     if (!versions) {
       return (await strategy.exists(key)) ? strategy.read(key) : null
@@ -379,8 +379,8 @@ export class AsyncMVCCTransaction<
   }
 
   async _diskDelete(key: K, snapshotVersion: number): Promise<void> {
-    const strategy = this.strategy;
-    if (!strategy) throw new Error('Root Transaction missing strategy');
+    const strategy = this.strategy
+    if (!strategy) throw new Error('Root Transaction missing strategy')
     if (await strategy.exists(key)) {
       const currentVal = await strategy.read(key)
       if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])

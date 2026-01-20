@@ -199,7 +199,7 @@ export class SyncMVCCTransaction<
             conflict: {
               key,
               parent: this.read(key) as T,
-              child: child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+              child: child.read(key) as T,
             },
           }
         }
@@ -212,7 +212,7 @@ export class SyncMVCCTransaction<
             conflict: {
               key,
               parent: this.read(key) as T,
-              child: child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+              child: child.read(key) as T,
             },
           }
         }
@@ -264,7 +264,7 @@ export class SyncMVCCTransaction<
               conflict: {
                 key,
                 parent: this.read(key) as T,
-                child: child._readSnapshot(key, child.snapshotVersion, child.snapshotLocalVersion)! as T,
+                child: child.read(key) as T,
               },
             }
           }
@@ -292,8 +292,8 @@ export class SyncMVCCTransaction<
   // --- Internal IO Helpers (Root Only) ---
 
   _diskWrite(key: K, value: T, version: number): void {
-    const strategy = this.strategy;
-    if (!strategy) throw new Error('Root Transaction missing strategy');
+    const strategy = this.strategy
+    if (!strategy) throw new Error('Root Transaction missing strategy')
     // Backup for MVCC
     if (strategy.exists(key)) {
       const currentVal = strategy.read(key)
@@ -310,8 +310,8 @@ export class SyncMVCCTransaction<
   }
 
   _diskRead(key: K, snapshotVersion: number): T | null {
-    const strategy = this.strategy;
-    if (!strategy) throw new Error('Root Transaction missing strategy');
+    const strategy = this.strategy
+    if (!strategy) throw new Error('Root Transaction missing strategy')
     const versions = this.versionIndex.get(key)
     if (!versions) {
       return strategy.exists(key) ? strategy.read(key) : null
@@ -367,8 +367,8 @@ export class SyncMVCCTransaction<
   }
 
   _diskDelete(key: K, snapshotVersion: number): void {
-    const strategy = this.strategy;
-    if (!strategy) throw new Error('Root Transaction missing strategy');
+    const strategy = this.strategy
+    if (!strategy) throw new Error('Root Transaction missing strategy')
     if (strategy.exists(key)) {
       const currentVal = strategy.read(key)
       if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])

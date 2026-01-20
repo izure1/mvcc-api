@@ -128,7 +128,11 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.keyVersions.set(key, this.localVersion)
   }
 
-  protected _getResultEntries(): { created: TransactionEntry<K, T>[], updated: TransactionEntry<K, T>[], deleted: TransactionEntry<K, T>[] } {
+  protected _getResultEntries(): {
+    created: TransactionEntry<K, T>[]
+    updated: TransactionEntry<K, T>[]
+    deleted: TransactionEntry<K, T>[]
+  } {
     const created: TransactionEntry<K, T>[] = []
     const updated: TransactionEntry<K, T>[] = []
     for (const [key, data] of this.writeBuffer.entries()) {
