@@ -87,4 +87,34 @@ describe('Concurrent Access Reproduction', () => {
     // Reader should see V1
     expect(reader.read(file)).toBe('Version 1')
   })
+
+  test('Scenario 4: Post-Concurrency New Transaction Read', () => {
+    const file = getPath('post_concurrency.txt')
+    fs.writeFileSync(file, 'Original')
+
+    const root = new SyncMVCCTransaction(new FileStrategy())
+
+    // 1. Concurrent Update/Delete happens
+    const deleter = root.createNested()
+    deleter.delete(file).commit()
+
+    // 2. All old transactions finish (simulate time passing)
+
+    // 3. New Transaction starts
+    const newTx = root.createNested()
+
+    // Should see deletion (null), NOT 'Original'
+    expect(newTx.read(file)).toBeNull()
+
+    // 4. Another file update scenario
+    const file2 = getPath('post_concurrency_upd.txt')
+    fs.writeFileSync(file2, 'Original')
+
+    const writer = root.createNested()
+    writer.write(file2, 'Updated').commit()
+
+    const newTx2 = root.createNested()
+    // Should see 'Updated'
+    expect(newTx2.read(file2)).toBe('Updated')
+  })
 })
