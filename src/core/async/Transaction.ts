@@ -363,7 +363,20 @@ export class AsyncMVCCTransaction<
       }
     }
 
-    if (!targetVerObj || !targetVerObj.exists) return null
+    if (!targetVerObj) {
+      // 스냅샷이 첫 번째 기록된 버전보다 이전인 경우 (예: 기존 파일이 MVCC 세션 중에 삭제됨)
+      // 바로 null을 반환하지 않고, 다음 버전(수정/삭제된 시점)에 백업된 캐시가 있는지 확인해야 함
+      if (nextVerObj) {
+        const cached = this.deletedCache.get(key)
+        if (cached) {
+          const match = cached.find(c => c.deletedAtVersion === nextVerObj!.version)
+          if (match) return match.value
+        }
+      }
+      return null
+    }
+
+    if (!targetVerObj.exists) return null
 
     if (!nextVerObj) {
       return strategy.read(key)
