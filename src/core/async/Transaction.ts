@@ -195,7 +195,7 @@ export class AsyncMVCCTransaction<
     }
   }
 
-  async _merge(child: MVCCTransaction<S, K, T>): Promise<TransactionMergeFailure<K, T> | null> {
+  async _merge(child: AsyncMVCCTransaction<S, K, T>): Promise<TransactionMergeFailure<K, T> | null> {
     return this.writeLock(async () => {
       if (this.parent) {
         // Nested Logic: Merge to self (Parent of Child) - no lock needed

@@ -11,18 +11,18 @@ import type { MVCCStrategy } from './Strategy'
  */
 export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   public committed: boolean
-  readonly snapshotVersion: number
-  readonly snapshotLocalVersion: number
-  readonly writeBuffer: Map<K, T>
-  readonly deleteBuffer: Set<K>
-  readonly createdKeys: Set<K> // create()로 생성된 키 추적
-  readonly deletedValues: Map<K, T> // delete 시 삭제 전 값 저장
-  readonly originallyExisted: Set<K> // 트랜잭션 시작 시점에 디스크에 존재했던 키 (deleted 결과 필터링용)
+  public readonly snapshotVersion: number
+  protected readonly snapshotLocalVersion: number
+  protected readonly writeBuffer: Map<K, T>
+  protected readonly deleteBuffer: Set<K>
+  protected readonly createdKeys: Set<K> // create()로 생성된 키 추적
+  protected readonly deletedValues: Map<K, T> // delete 시 삭제 전 값 저장
+  protected readonly originallyExisted: Set<K> // 트랜잭션 시작 시점에 디스크에 존재했던 키 (deleted 결과 필터링용)
 
   // Nested Transaction Properties
-  readonly parent?: MVCCTransaction<S, K, T>
+  protected readonly parent?: MVCCTransaction<S, K, T>
   public localVersion: number // Local version for Nested Conflict Detection
-  readonly keyVersions: Map<K, number> // Key -> Local Version (When it was modified locally)
+  protected readonly keyVersions: Map<K, number> // Key -> Local Version (When it was modified locally)
 
   // Root Transaction Properties (Only populated if this is Root)
   readonly root: MVCCTransaction<S, K, T>
