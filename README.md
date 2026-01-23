@@ -102,6 +102,22 @@ const result = await tx.commit()
 await root.commit() // Persist to storage
 ```
 
+> [!CAUTION]
+> **Immutability and Reference Types**
+>
+> When using `write(key, value)` with reference types (objects, arrays), you MUST provide a **copy** of the value (Copy-on-Write).
+> Since `mvcc-api` stores the value in an internal buffer, modifying the original object/array after calling `write()` but before `commit()` will affect the data in the transaction.
+>
+> ```typescript
+> // ❌ Wrong: Modifying original object
+> const data = { count: 1 }
+> tx.write('key', data)
+> data.count = 2 // Internal buffer also changes!
+>
+> // ✅ Correct: Pass a copy
+> tx.write('key', { ...data })
+> ```
+
 ## Visibility Rules
 
 ```mermaid
