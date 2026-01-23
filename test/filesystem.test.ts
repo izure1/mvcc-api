@@ -175,4 +175,37 @@ describe('FileSystem MVCC', () => {
     const tx4 = root.createNested()
     expect(tx4.exists(file)).toBe(false)
   })
+
+  test('Scenario: Root commit and then read', () => {
+    const root = new SyncMVCCTransaction(new FileStrategy())
+    const file = getPath('root_commit_read.txt')
+
+    // 1. 루트에서 직접 create → commit
+    root.create(file, 'root created')
+    const result1 = root.commit()
+    expect(result1.success).toBe(true)
+
+    // 2. 커밋 후 루트에서 read - 이전에는 null이 반환되던 버그
+    expect(root.read(file)).toBe('root created')
+    expect(root.exists(file)).toBe(true)
+
+    // 3. 루트에서 write → commit → read
+    root.write(file, 'root updated')
+    const result2 = root.commit()
+    expect(result2.success).toBe(true)
+    expect(root.read(file)).toBe('root updated')
+
+    // 4. 루트에서 delete → commit → read
+    root.delete(file)
+    const result3 = root.commit()
+    expect(result3.success).toBe(true)
+    expect(root.read(file)).toBeNull()
+    expect(root.exists(file)).toBe(false)
+
+    // 5. 루트 재사용: 새 파일 생성
+    const file2 = getPath('root_commit_read2.txt')
+    root.create(file2, 'another file')
+    root.commit()
+    expect(root.read(file2)).toBe('another file')
+  })
 })

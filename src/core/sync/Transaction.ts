@@ -173,7 +173,8 @@ export class SyncMVCCTransaction<
         this.deletedValues.clear()
         this.originallyExisted.clear()
         this.keyVersions.clear()
-        this.localVersion = 0
+        this.localVersion = 0;
+        (this as any).snapshotVersion = this.version  // 커밋 후 스냅샷 버전 갱신
       }
       // root는 committed를 true로 설정하지 않음 - 재사용 가능
     }
