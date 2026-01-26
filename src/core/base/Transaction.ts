@@ -128,7 +128,11 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     this.keyVersions.set(key, this.localVersion)
   }
 
-  protected _getResultEntries(): {
+  /**
+   * Returns the entries that will be created, updated, and deleted by this transaction.
+   * @returns An object containing arrays of created, updated, and deleted entries.
+   */
+  getResultEntries(): {
     created: TransactionEntry<K, T>[]
     updated: TransactionEntry<K, T>[]
     deleted: TransactionEntry<K, T>[]
@@ -159,7 +163,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    * @returns The result object with success, created, updated, and deleted keys.
    */
   rollback(): TransactionResult<K, T> {
-    const { created, updated, deleted } = this._getResultEntries()
+    const { created, updated, deleted } = this.getResultEntries()
 
     this.writeBuffer.clear()
     this.deleteBuffer.clear()

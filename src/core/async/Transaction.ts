@@ -120,7 +120,7 @@ export class AsyncMVCCTransaction<
   }
 
   async commit(label?: string): Promise<TransactionResult<K, T>> {
-    const { created, updated, deleted } = this._getResultEntries()
+    const { created, updated, deleted } = this.getResultEntries()
 
     if (this.committed) {
       return {

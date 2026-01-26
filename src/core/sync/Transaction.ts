@@ -112,7 +112,7 @@ export class SyncMVCCTransaction<
   }
 
   commit(label?: string): TransactionResult<K, T> {
-    const { created, updated, deleted } = this._getResultEntries()
+    const { created, updated, deleted } = this.getResultEntries()
 
     if (this.committed) {
       return {
