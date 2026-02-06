@@ -140,6 +140,24 @@ sequenceDiagram
 > - Transactions can always see their own changes.
 > - Children can only see **committed data** at the time of creation.
 > - Snapshots are maintained even if external commits occur after creation.
+>
+> [!WARNING]
+> **Memory Management**
+>
+> Every transaction created via `createNested()` MUST be finished with either `commit()` or `rollback()`.
+> Internally, the Root transaction tracks all active transactions to determine which old versions can be safely pruned from memory.
+> Failing to close a transaction will prevent the internal Garbage Collection (Pruning) from reclaiming memory, eventually leading to a **Memory Leak**.
+>
+> ```typescript
+> const tx = root.createNested()
+> try {
+>   // ... work ...
+>   await tx.commit()
+> } finally {
+>   // Ensure rollback is called if commit failed or an error occurred
+>   if (!tx.committed) tx.rollback()
+> }
+> ```
 
 ## Conflict Detection
 

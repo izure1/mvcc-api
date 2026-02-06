@@ -224,4 +224,50 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    * @param snapshotLocalVersion The local version within the parent's buffer to read at.
    */
   abstract _readSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Deferred<T | null>
+
+  /**
+   * Cleans up both deletedCache and versionIndex based on minActiveVersion.
+   * Root transactions call this after commit to reclaim memory.
+   */
+  protected _cleanupDeletedCache(): void {
+    if (this.deletedCache.size === 0 && this.versionIndex.size === 0) return
+
+    let minActiveVersion = this.version
+    if (this.activeTransactions.size > 0) {
+      for (const tx of this.activeTransactions) {
+        if (!tx.committed && tx.snapshotVersion < minActiveVersion) {
+          minActiveVersion = tx.snapshotVersion
+        }
+      }
+    }
+
+    // deletedCache pruning
+    if (this.deletedCache.size > 0) {
+      for (const [key, cachedList] of this.deletedCache) {
+        const remaining = cachedList.filter(item => item.deletedAtVersion > minActiveVersion)
+        if (remaining.length === 0) {
+          this.deletedCache.delete(key)
+        } else {
+          this.deletedCache.set(key, remaining)
+        }
+      }
+    }
+
+    // versionIndex pruning
+    if (this.versionIndex.size > 0) {
+      for (const [key, versions] of this.versionIndex) {
+        let latestInSnapshotIdx = -1
+        for (let i = versions.length - 1; i >= 0; i--) {
+          if (versions[i].version <= minActiveVersion) {
+            latestInSnapshotIdx = i
+            break
+          }
+        }
+
+        if (latestInSnapshotIdx > 0) {
+          versions.splice(0, latestInSnapshotIdx)
+        }
+      }
+    }
+  }
 }

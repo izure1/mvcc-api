@@ -430,26 +430,5 @@ export class AsyncMVCCTransaction<
     if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
     this.versionIndex.get(key)!.push({ version: snapshotVersion, exists: false })
   }
-
-  _cleanupDeletedCache(): void {
-    if (this.deletedCache.size === 0) return
-
-    let minActiveVersion = this.version
-    if (this.activeTransactions.size > 0) {
-      for (const tx of this.activeTransactions) {
-        if (!tx.committed && tx.snapshotVersion < minActiveVersion) {
-          minActiveVersion = tx.snapshotVersion
-        }
-      }
-    }
-
-    for (const [key, cachedList] of this.deletedCache) {
-      const remaining = cachedList.filter(item => item.deletedAtVersion > minActiveVersion)
-      if (remaining.length === 0) {
-        this.deletedCache.delete(key)
-      } else {
-        this.deletedCache.set(key, remaining)
-      }
-    }
-  }
 }
+
