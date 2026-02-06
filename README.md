@@ -140,7 +140,7 @@ sequenceDiagram
 > - Transactions can always see their own changes.
 > - Children can only see **committed data** at the time of creation.
 > - Snapshots are maintained even if external commits occur after creation.
->
+
 > [!WARNING]
 > **Memory Management**
 >
