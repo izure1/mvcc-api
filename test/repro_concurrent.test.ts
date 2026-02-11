@@ -38,6 +38,7 @@ describe('Concurrent Access Reproduction', () => {
     // 2. Start Deleter
     const deleter = root.createNested()
     deleter.delete(file).commit()
+    root.commit() // Persist deletion to filesystem
 
     // 3. Verify physical deletion
     expect(fs.existsSync(file)).toBe(false)
@@ -61,6 +62,7 @@ describe('Concurrent Access Reproduction', () => {
     // 2. Start Writer
     const writer = root.createNested()
     writer.write(file, 'Updated Content').commit()
+    root.commit() // Persist update to filesystem
 
     // 3. Verify physical update
     expect(fs.readFileSync(file, 'utf-8')).toBe('Updated Content')

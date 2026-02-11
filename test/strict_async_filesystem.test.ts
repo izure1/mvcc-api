@@ -44,6 +44,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
       await writer.write(historyFile, `Generation ${i}`)
       await writer.commit()
     }
+    await root.commit() // Persist to filesystem
 
     // Current state should be 50
     expect(await fs.promises.readFile(historyFile, 'utf-8')).toBe('Generation 50')
@@ -139,6 +140,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     }
 
     await tx1.commit()
+    await root1.commit() // Persist to filesystem
     expect(await fs.promises.readFile(tempFile, 'utf-8')).toBe('In Progress')
 
     // Root 3
@@ -165,6 +167,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     expect(await tx.read(file)).toBeNull()
 
     await tx.commit()
+    await root.commit() // Persist to filesystem
 
     try {
       await fs.promises.access(file)
@@ -206,6 +209,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const initTx = root.createNested()
     await initTx.create(stableFile, 'Stable')
     await initTx.commit()
+    await root.commit() // Persist to filesystem
 
     const tx = root.createNested()
     await tx.create(dirtyFile, 'Dirty')

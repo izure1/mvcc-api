@@ -32,18 +32,14 @@ describe('Memory Pruning', () => {
     }
 
     const versionIndex = (tx as any).versionIndex.get('key')
-    // commit()마다 pruning이 일어나므로, 각 루프마다 이전 버전이 정리됩니다.
-    // 따라서 루프 종료 후에는 마지막 버전 1개만 남아야 합니다.
-    expect(versionIndex.length).toBe(1)
-    expect(versionIndex[0].version).toBe(10)
+    expect(versionIndex).toBeUndefined()
 
     // Another commit
     tx.write('key', 'final')
     tx.commit()
 
     const prunedIndex = (tx as any).versionIndex.get('key')
-    expect(prunedIndex.length).toBe(1)
-    expect(prunedIndex[0].version).toBe(11)
+    expect(prunedIndex).toBeUndefined()
   })
 
   it('should not prune versions needed by active transactions in SyncMVCCTransaction', () => {
@@ -57,17 +53,18 @@ describe('Memory Pruning', () => {
     tx.write('key', 'v3').commit() // v3
 
     const versionIndex = (tx as any).versionIndex.get('key')
-    expect(versionIndex.length).toBe(3)
+    // v1 entry was pruned during v1 commit (no active tx at that point)
+    // Only v2 and v3 remain
+    expect(versionIndex.length).toBe(2)
 
     // Trigger cleanup - create 'other' instead of write
     tx.create('other', 'val').commit() // v4
 
-    // Because 'child' is active with snapshotVersion 1, we must keep at least the latest v <= 1
-    // versions: [v1, v2, v3]
+    // Because 'child' is active with snapshotVersion 1, we must keep versions > 1
+    // versions: [v2, v3] - both needed for snapshot isolation
     // minActiveVersion = 1
-    // latest v <= 1 is index 0
-    // so no pruning should occur (latestInSnapshotIdx = 0)
-    expect((tx as any).versionIndex.get('key').length).toBe(3)
+    // no version <= 1, so latestInSnapshotIdx = -1, no pruning
+    expect((tx as any).versionIndex.get('key').length).toBe(2)
 
     // Release child
     child.rollback()
@@ -75,10 +72,8 @@ describe('Memory Pruning', () => {
     // Now trigger cleanup again
     tx.write('other', 'new').commit() // v5
     // minActiveVersion = 5
-    // latest v <= 5 for 'key' is v3 at index 2
-    // so it should prune index 0 and 1. [v3] remains.
-    expect((tx as any).versionIndex.get('key').length).toBe(1)
-    expect((tx as any).versionIndex.get('key')[0].version).toBe(3)
+    // Both v2, v3 <= 5, latestInSnapshotIdx = 1 = length-1 → key deleted entirely
+    expect((tx as any).versionIndex.get('key')).toBeUndefined()
   })
 
   it('should prune versionIndex in AsyncMVCCTransaction', async () => {
@@ -92,11 +87,11 @@ describe('Memory Pruning', () => {
     }
 
     // Aggressive pruning expected
-    expect((tx as any).versionIndex.get('key').length).toBe(1)
+    expect((tx as any).versionIndex.get('key')).toBeUndefined()
 
     await tx.write('key', 'final')
     await tx.commit()
 
-    expect((tx as any).versionIndex.get('key').length).toBe(1)
+    expect((tx as any).versionIndex.get('key')).toBeUndefined()
   })
 })

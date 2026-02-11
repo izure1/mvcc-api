@@ -226,6 +226,15 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   abstract _readSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Deferred<T | null>
 
   /**
+   * Checks if a key exists at a specific snapshot version.
+   * Used by child transactions to check existence from parent respecting the child's snapshot.
+   * @param key The key to check.
+   * @param snapshotVersion The global version to check at.
+   * @param snapshotLocalVersion The local version within the parent's buffer to check at.
+   */
+  abstract _existsSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Deferred<boolean>
+
+  /**
    * Cleans up both deletedCache and versionIndex based on minActiveVersion.
    * Root transactions call this after commit to reclaim memory.
    */
@@ -264,7 +273,10 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
           }
         }
 
-        if (latestInSnapshotIdx > 0) {
+        if (latestInSnapshotIdx === versions.length - 1) {
+          // 모든 버전이 커버됨 → 맵에서 키 자체 삭제
+          this.versionIndex.delete(key)
+        } else if (latestInSnapshotIdx > 0) {
           versions.splice(0, latestInSnapshotIdx)
         }
       }

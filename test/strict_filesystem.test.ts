@@ -43,6 +43,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
       const writer = root.createNested()
       writer.write(historyFile, `Generation ${i}`).commit()
     }
+    root.commit() // Persist to filesystem
 
     // Current state should be 50
     expect(fs.readFileSync(historyFile, 'utf-8')).toBe('Generation 50')
@@ -137,6 +138,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     expect(fs.existsSync(tempFile)).toBe(false)
 
     tx1.commit()
+    root1.commit() // Persist to filesystem
     expect(fs.existsSync(tempFile)).toBe(true)
 
     // Root 3
@@ -167,6 +169,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     expect(tx.read(file)).toBeNull()
 
     tx.commit()
+    root.commit() // Persist to filesystem
 
     // Verify Persistence
     expect(fs.existsSync(file)).toBe(false)
@@ -203,6 +206,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     const dirtyFile = getPath('dirty.txt')
 
     root.createNested().create(stableFile, 'Stable').commit()
+    root.commit() // Persist initial file to filesystem
 
     const tx = root.createNested()
     tx.create(dirtyFile, 'Dirty')

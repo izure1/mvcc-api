@@ -65,9 +65,7 @@ export class SyncMVCCTransaction<
     if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
     if (this.deleteBuffer.has(key)) return null
 
-    // 2. 자식 트랜잭션은 부모의 미커밋 버퍼를 볼 수 없음
-    //    오직 커밋된 데이터(디스크)만 볼 수 있음
-    //    root의 _diskRead를 통해 snapshotVersion 시점의 커밋된 데이터를 읽음
+    // 2. 루트의 스냅샷 읽기를 통해 버퍼 + 디스크에서 읽음
     return (this.root as any)._diskRead(key, this.snapshotVersion)
   }
 
@@ -77,8 +75,32 @@ export class SyncMVCCTransaction<
     if (this.deleteBuffer.has(key)) return false
     // 2. 쓰기 버퍼에 있으면 존재함
     if (this.writeBuffer.has(key)) return true
-    // 3. 디스크에서 확인
+    // 3. 루트의 스냅샷을 통해 버퍼 + 디스크에서 확인
     return (this.root as any)._diskExists(key, this.snapshotVersion)
+  }
+
+  _existsSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): boolean {
+    // writeBuffer 확인 (스냅샷 시점 이전 변경만)
+    if (this.writeBuffer.has(key)) {
+      const keyModVersion = this.keyVersions.get(key)
+      if (snapshotLocalVersion === undefined || keyModVersion === undefined || keyModVersion <= snapshotLocalVersion) {
+        return true
+      }
+    }
+
+    // deleteBuffer 확인
+    if (this.deleteBuffer.has(key)) {
+      const keyModVersion = this.keyVersions.get(key)
+      if (snapshotLocalVersion === undefined || keyModVersion === undefined || keyModVersion <= snapshotLocalVersion) {
+        return false
+      }
+    }
+
+    if (this.parent) {
+      return this.parent._existsSnapshot(key, snapshotVersion, this.snapshotLocalVersion) as boolean
+    } else {
+      return this._diskExists(key, snapshotVersion)
+    }
   }
 
   _readSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): T | null {
@@ -250,11 +272,10 @@ export class SyncMVCCTransaction<
       (this.root as any).activeTransactions.delete(child)
 
     } else {
-      // Root Logic: Persistence
-      const newVersion = this.version + 1
-
-      // 1. Conflict Detection (Global) - skip if merging self (root commit)
+      // Root Logic
       if (child !== this) {
+        // Child → Root 병합: versionIndex/deletedCache 업데이트하되, 전략에는 기록하지 않음
+        // 1. Conflict Detection (Global)
         const modifiedKeys = new Set([...child.writeBuffer.keys(), ...child.deleteBuffer])
         for (const key of modifiedKeys) {
           const versions = this.versionIndex.get(key)
@@ -272,42 +293,83 @@ export class SyncMVCCTransaction<
             }
           }
         }
-      }
 
-      // 2. Merge child buffers to root (for commit result tracking)
-      for (const [key, value] of child.writeBuffer) {
-        this.writeBuffer.set(key, value)
-        this.deleteBuffer.delete(key)
-        if (child.createdKeys.has(key)) {
-          this.createdKeys.add(key)
+        const newVersion = this.version + 1
+
+        // 2. Merge child buffers to root buffer with version tracking
+        for (const [key, value] of child.writeBuffer) {
+          // 기존 값 백업 (deletedCache)
+          if (this.writeBuffer.has(key)) {
+            if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
+            this.deletedCache.get(key)!.push({
+              value: this.writeBuffer.get(key)!,
+              deletedAtVersion: newVersion
+            })
+          } else if (this.strategy!.exists(key)) {
+            if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
+            this.deletedCache.get(key)!.push({
+              value: this.strategy!.read(key),
+              deletedAtVersion: newVersion
+            })
+          }
+          this.writeBuffer.set(key, value)
+          this.deleteBuffer.delete(key)
+          if (child.createdKeys.has(key)) {
+            this.createdKeys.add(key)
+          }
+          // versionIndex 업데이트
+          if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
+          this.versionIndex.get(key)!.push({ version: newVersion, exists: true })
         }
-      }
-      for (const key of child.deleteBuffer) {
-        this.deleteBuffer.add(key)
-        this.writeBuffer.delete(key)
-        this.createdKeys.delete(key)
-        const deletedValue = child.deletedValues.get(key)
-        if (deletedValue !== undefined) {
-          this.deletedValues.set(key, deletedValue)
+        for (const key of child.deleteBuffer) {
+          // 기존 값 백업 (deletedCache)
+          if (this.writeBuffer.has(key)) {
+            if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
+            this.deletedCache.get(key)!.push({
+              value: this.writeBuffer.get(key)!,
+              deletedAtVersion: newVersion
+            })
+          } else if (this.strategy!.exists(key)) {
+            if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
+            this.deletedCache.get(key)!.push({
+              value: this.strategy!.read(key),
+              deletedAtVersion: newVersion
+            })
+          }
+          this.deleteBuffer.add(key)
+          this.writeBuffer.delete(key)
+          this.createdKeys.delete(key)
+          const deletedValue = child.deletedValues.get(key)
+          if (deletedValue !== undefined) {
+            this.deletedValues.set(key, deletedValue)
+          }
+          if (child.originallyExisted.has(key)) {
+            this.originallyExisted.add(key)
+          }
+          // versionIndex 업데이트
+          if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
+          this.versionIndex.get(key)!.push({ version: newVersion, exists: false })
         }
-        if (child.originallyExisted.has(key)) {
-          this.originallyExisted.add(key)
+
+        this.version = newVersion;
+        (this.root as any).activeTransactions.delete(child)
+        this._cleanupDeletedCache()
+      } else {
+        // Root 자체 커밋: 버퍼 내용을 전략에 영속화
+        const newVersion = this.version + 1
+
+        for (const [key, value] of this.writeBuffer) {
+          this._diskWrite(key, value, newVersion)
         }
-      }
+        for (const key of this.deleteBuffer) {
+          this._diskDelete(key, newVersion)
+        }
 
-      // 3. Apply changes to Strategy
-      for (const [key, value] of child.writeBuffer) {
-        this._diskWrite(key, value, newVersion)
-      }
-      for (const key of child.deleteBuffer) {
-        this._diskDelete(key, newVersion)
-      }
+        this.version = newVersion
 
-      this.version = newVersion;
-      (this.root as any).activeTransactions.delete(child)
-
-      // 4. Garbage Collection
-      this._cleanupDeletedCache()
+        // Garbage Collection
+        this._cleanupDeletedCache()
+      }
     }
 
     return null
@@ -338,6 +400,9 @@ export class SyncMVCCTransaction<
     if (!strategy) throw new Error('Root Transaction missing strategy')
     const versions = this.versionIndex.get(key)
     if (!versions) {
+      // versionIndex에 없으면 writeBuffer 확인 후 전략에서 읽기
+      if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
+      if (this.deleteBuffer.has(key)) return null
       return strategy.exists(key) ? strategy.read(key) : null
     }
 
@@ -354,8 +419,6 @@ export class SyncMVCCTransaction<
     }
 
     if (!targetVerObj) {
-      // 스냅샷이 첫 번째 기록된 버전보다 이전인 경우 (예: 기존 파일이 MVCC 세션 중에 삭제됨)
-      // 바로 null을 반환하지 않고, 다음 버전(수정/삭제된 시점)에 백업된 캐시가 있는지 확인해야 함
       if (nextVerObj) {
         const cached = this.deletedCache.get(key)
         if (cached) {
@@ -363,12 +426,15 @@ export class SyncMVCCTransaction<
           if (match) return match.value
         }
       }
-      return null
+      // versionIndex의 모든 버전이 스냅샷 이후인 경우, 전략에서 확인
+      return strategy.exists(key) ? strategy.read(key) : null
     }
 
     if (!targetVerObj.exists) return null
 
     if (!nextVerObj) {
+      // 최신 버전: writeBuffer에 있으면 writeBuffer에서, 아니면 전략에서
+      if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
       return strategy.read(key)
     }
 
@@ -386,6 +452,9 @@ export class SyncMVCCTransaction<
     if (!strategy) throw new Error('Root Transaction missing strategy')
     const versions = this.versionIndex.get(key)
     if (!versions) {
+      // versionIndex에 없으면 writeBuffer/deleteBuffer 확인 후 전략
+      if (this.writeBuffer.has(key)) return true
+      if (this.deleteBuffer.has(key)) return false
       return strategy.exists(key)
     }
 
@@ -413,9 +482,9 @@ export class SyncMVCCTransaction<
         value: currentVal,
         deletedAtVersion: snapshotVersion
       })
+      strategy.delete(key)
     }
 
-    strategy.delete(key)
     if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
     this.versionIndex.get(key)!.push({ version: snapshotVersion, exists: false })
   }

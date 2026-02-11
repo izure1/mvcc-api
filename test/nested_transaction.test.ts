@@ -97,8 +97,12 @@ describe('Nested Transactions', () => {
     // Strategy still has no k1 (only base was committed)
     expect(strategy.exists('k1')).toBe(false)
 
-    parent.commit() // Merge to Root and persist immediately
-    // Now it's persisted
+    parent.commit() // Merge to Root buffer (not strategy)
+    // Strategy still has no k1 (only root.commit() persists)
+    expect(strategy.exists('k1')).toBe(false)
+
+    // Root commit persists to strategy
+    root.commit()
     expect(strategy.read('k1')).toBe('child_v1')
   })
 
@@ -167,6 +171,10 @@ describe('Nested Transactions', () => {
     expect(child.read('k1')).toBe('child_val') // 자신의 버퍼
 
     child.commit()
+    // child→root merge goes to buffer, NOT strategy
+    expect(root.getStrategy().read('k1')).toBe('root_val') // strategy still has root_val, child merge only went to buffer
+
+    root.commit()
     expect(root.getStrategy().read('k1')).toBe('child_val')
   })
 })
@@ -330,6 +338,10 @@ describe('Strict Snapshot Isolation Tests', () => {
     expect(l1.read('key')).toBe('l3') // 병합된 값이 l1으로
 
     l1.commit()
+    // l1→root merge goes to buffer, NOT strategy
+    expect(strategy.read('key')).toBe('root')
+
+    root.commit()
     expect(strategy.read('key')).toBe('l3')
   })
 })
