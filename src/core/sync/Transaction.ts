@@ -9,7 +9,6 @@ export class SyncMVCCTransaction<
 > extends MVCCTransaction<S, K, T> {
   create(key: K, value: T): this {
     if (this.committed) throw new Error('Transaction already committed')
-    // 이미 버퍼에 있거나 read로 존재하면 오류
     if (this.writeBuffer.has(key) || (!this.deleteBuffer.has(key) && this.read(key) !== null)) {
       throw new Error(`Key already exists: ${key}`)
     }
@@ -19,7 +18,6 @@ export class SyncMVCCTransaction<
 
   write(key: K, value: T): this {
     if (this.committed) throw new Error('Transaction already committed')
-    // 버퍼에 없고 read로도 없으면 오류
     if (!this.writeBuffer.has(key) && (this.deleteBuffer.has(key) || this.read(key) === null)) {
       throw new Error(`Key not found: ${key}`)
     }
@@ -29,7 +27,6 @@ export class SyncMVCCTransaction<
 
   delete(key: K): this {
     if (this.committed) throw new Error('Transaction already committed')
-    // 버퍼에 있으면 그 값을 저장, 아니면 read로 가져옴
     let valueToDelete: T | null = null
     let wasInWriteBuffer = false
     if (this.writeBuffer.has(key)) {
@@ -42,8 +39,6 @@ export class SyncMVCCTransaction<
       throw new Error(`Key not found: ${key}`)
     }
     this.deletedValues.set(key, valueToDelete)
-    // 디스크에서 읽은 값이거나, write한 값이지만 createdKeys에 없으면 (디스크 값을 수정한 것)
-    // originallyExisted에 추가 (create→delete는 제외)
     if (!wasInWriteBuffer || !this.createdKeys.has(key)) {
       this.originallyExisted.add(key)
     }
@@ -61,11 +56,8 @@ export class SyncMVCCTransaction<
 
   read(key: K): T | null {
     if (this.committed) throw new Error('Transaction already committed')
-    // 1. 자신의 버퍼에서 먼저 확인
     if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
     if (this.deleteBuffer.has(key)) return null
-
-    // 2. 부모 체인을 따라 스냅샷 읽기
     if (this.parent) {
       return this.parent._readSnapshot(key, this.snapshotVersion, this.snapshotLocalVersion) as T | null
     }
@@ -74,11 +66,8 @@ export class SyncMVCCTransaction<
 
   exists(key: K): boolean {
     if (this.committed) throw new Error('Transaction already committed')
-    // 1. 삭제 버퍼에 있으면 존재하지 않음
     if (this.deleteBuffer.has(key)) return false
-    // 2. 쓰기 버퍼에 있으면 존재함
     if (this.writeBuffer.has(key)) return true
-    // 3. 부모 체인을 따라 스냅샷 확인
     if (this.parent) {
       return this.parent._existsSnapshot(key, this.snapshotVersion, this.snapshotLocalVersion) as boolean
     }
@@ -86,22 +75,31 @@ export class SyncMVCCTransaction<
   }
 
   _existsSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): boolean {
-    // writeBuffer 확인 (스냅샷 시점 이전 변경만)
+    // 1. 버퍼 직접 확인 (스냅샷 시점 이전에 존재한 것이면 모두 허용)
     if (this.writeBuffer.has(key)) {
-      const keyModVersion = this.keyVersions.get(key)
-      if (snapshotLocalVersion === undefined || keyModVersion === undefined || keyModVersion <= snapshotLocalVersion) {
+      const keyModVersion = this.keyVersions.get(key)!
+      if (snapshotLocalVersion === undefined || keyModVersion <= snapshotLocalVersion) {
         return true
       }
     }
-
-    // deleteBuffer 확인
     if (this.deleteBuffer.has(key)) {
-      const keyModVersion = this.keyVersions.get(key)
-      if (snapshotLocalVersion === undefined || keyModVersion === undefined || keyModVersion <= snapshotLocalVersion) {
+      const keyModVersion = this.keyVersions.get(key)!
+      if (snapshotLocalVersion === undefined || keyModVersion <= snapshotLocalVersion) {
         return false
       }
     }
 
+    // 2. 이력 확인 (과거 스냅샷 버전 탐색)
+    const history = this.bufferHistory.get(key)
+    if (history && snapshotLocalVersion !== undefined) {
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].version <= snapshotLocalVersion) {
+          return history[i].exists
+        }
+      }
+    }
+
+    // 3. 부모 또는 디스크로 전이
     if (this.parent) {
       return this.parent._existsSnapshot(key, snapshotVersion, this.snapshotLocalVersion) as boolean
     } else {
@@ -110,90 +108,57 @@ export class SyncMVCCTransaction<
   }
 
   _readSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): T | null {
-    // 커밋된 root라도 디스크 읽기는 가능해야 함 (자식 트랜잭션이 읽기 가능)
-
-    // 버퍼에서 읽을 때는 snapshotLocalVersion 이전의 변경만 볼 수 있음
+    // 1. 버퍼 직접 확인 (스냅샷 시점 이전에 존재한 것이면 모두 허용)
     if (this.writeBuffer.has(key)) {
-      const keyModVersion = this.keyVersions.get(key)
-      // snapshotLocalVersion이 없거나, 키 수정 버전이 스냅샷 이전이면 볼 수 있음
-      if (snapshotLocalVersion === undefined || keyModVersion === undefined || keyModVersion <= snapshotLocalVersion) {
+      const keyModVersion = this.keyVersions.get(key)!
+      if (snapshotLocalVersion === undefined || keyModVersion <= snapshotLocalVersion) {
         return this.writeBuffer.get(key)!
       }
-      // 그렇지 않으면 이 버퍼의 값은 스냅샷 이후에 수정된 것이므로 더 위로 탐색
     }
-
     if (this.deleteBuffer.has(key)) {
-      const keyModVersion = this.keyVersions.get(key)
-      if (snapshotLocalVersion === undefined || keyModVersion === undefined || keyModVersion <= snapshotLocalVersion) {
+      const keyModVersion = this.keyVersions.get(key)!
+      if (snapshotLocalVersion === undefined || keyModVersion <= snapshotLocalVersion) {
         return null
       }
-      // 삭제가 스냅샷 이후면 더 위로 탐색
+    }
+
+    // 2. 이력 확인 (과거 스냅샷 버전 탐색)
+    const history = this.bufferHistory.get(key)
+    if (history && snapshotLocalVersion !== undefined) {
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].version <= snapshotLocalVersion) {
+          return history[i].exists ? history[i].value : null
+        }
+      }
     }
 
     if (this.parent) {
-      // 재귀적으로 부모로 올라가면서 이 트랜잭션의 snapshotLocalVersion을 전달
       return this.parent._readSnapshot(key, snapshotVersion, this.snapshotLocalVersion) as T | null
     } else {
-      // Root Logic: 디스크에서 읽기
       return this._diskRead(key, snapshotVersion)
     }
   }
 
   commit(label?: string): TransactionResult<K, T> {
     const { created, updated, deleted } = this.getResultEntries()
-
     if (this.committed) {
-      return {
-        label,
-        success: false,
-        error: 'Transaction already committed',
-        conflict: undefined,
-        created,
-        updated,
-        deleted,
-      }
+      return { label, success: false, error: 'Transaction already committed', conflict: undefined, created, updated, deleted }
     }
-
     if (this.hasCommittedAncestor()) {
-      return {
-        label,
-        success: false,
-        error: 'Ancestor transaction already committed',
-        conflict: undefined,
-        created,
-        updated,
-        deleted,
-      }
+      return { label, success: false, error: 'Ancestor transaction already committed', conflict: undefined, created, updated, deleted }
     }
 
     if (this.parent) {
       const failure = this.parent._merge(this) as TransactionMergeFailure<K, T> | null
       if (failure) {
-        return {
-          label,
-          success: false,
-          error: failure.error,
-          conflict: failure.conflict,
-          created,
-          updated,
-          deleted,
-        }
+        return { label, success: false, error: failure.error, conflict: failure.conflict, created, updated, deleted }
       }
-      this.committed = true // Nested 트랜잭션은 커밋 후 사용 불가
+      this.committed = true
     } else {
-      // Root Logic: 커밋 후에도 계속 사용 가능
       if (this.writeBuffer.size > 0 || this.deleteBuffer.size > 0) {
         const failure = this._merge(this) as TransactionMergeFailure<K, T> | null
         if (failure) {
-          return {
-            label,
-            success: false,
-            error: failure.error,
-            conflict: failure.conflict,
-            created: [],
-            updated: [],
-            deleted: [],
-          }
+          return { label, success: false, error: failure.error, conflict: failure.conflict, created: [], updated: [], deleted: [] }
         }
         this.writeBuffer.clear()
         this.deleteBuffer.clear()
@@ -201,35 +166,22 @@ export class SyncMVCCTransaction<
         this.deletedValues.clear()
         this.originallyExisted.clear()
         this.keyVersions.clear()
+        this.bufferHistory.clear()
         this.localVersion = 0;
-        (this as any).snapshotVersion = this.version  // 커밋 후 스냅샷 버전 갱신
+        (this as any).snapshotVersion = this.version
       }
-      // root는 committed를 true로 설정하지 않음 - 재사용 가능
     }
-
-    return {
-      label,
-      success: true,
-      created,
-      updated,
-      deleted,
-    }
+    return { label, success: true, created, updated, deleted }
   }
 
   _merge(child: SyncMVCCTransaction<S, K, T>): TransactionMergeFailure<K, T> | null {
     if (this.parent) {
-      // Nested Logic: Merge to self (Parent of Child)
-      // 1. Conflict Detection between Siblings (via keyVersions)
       for (const key of child.writeBuffer.keys()) {
         const lastModLocalVer = this.keyVersions.get(key)
         if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
           return {
             error: `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`,
-            conflict: {
-              key,
-              parent: this.read(key) as T,
-              child: child.read(key) as T,
-            },
+            conflict: { key, parent: this.read(key) as T, child: child.read(key) as T },
           }
         }
       }
@@ -238,164 +190,89 @@ export class SyncMVCCTransaction<
         if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
           return {
             error: `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`,
-            conflict: {
-              key,
-              parent: this.read(key) as T,
-              child: child.read(key) as T,
-            },
+            conflict: { key, parent: this.read(key) as T, child: child.read(key) as T },
           }
         }
       }
 
-      // 2. Merge buffers (직접 버퍼에 추가하여 createdKeys 유지)
-      const newLocalVersion = this.localVersion + 1
-      for (const key of child.writeBuffer.keys()) {
-        this.writeBuffer.set(key, child.writeBuffer.get(key)!)
-        this.deleteBuffer.delete(key)
-        this.keyVersions.set(key, newLocalVersion)
-        // 자식이 create한 키면 부모의 createdKeys에도 추가
-        if (child.createdKeys.has(key)) {
-          this.createdKeys.add(key)
-        }
+      const mergeVersion = ++this.localVersion
+      for (const [key, value] of child.writeBuffer) {
+        const wasCreated = child.createdKeys.has(key)
+        if (wasCreated) this._bufferCreate(key, value, mergeVersion)
+        else this._bufferWrite(key, value, mergeVersion)
       }
       for (const key of child.deleteBuffer) {
-        this.deleteBuffer.add(key)
-        this.writeBuffer.delete(key)
-        this.createdKeys.delete(key) // 삭제된 키는 created가 아님
-        this.keyVersions.set(key, newLocalVersion)
-        // 자식의 deletedValues도 부모에게 전달
         const deletedValue = child.deletedValues.get(key)
-        if (deletedValue !== undefined) {
-          this.deletedValues.set(key, deletedValue)
-        }
-        // 자식의 originallyExisted도 부모에게 전달
-        if (child.originallyExisted.has(key)) {
+        if (deletedValue !== undefined) this.deletedValues.set(key, deletedValue)
+        if (child.originallyExisted.has(key) && !this.createdKeys.has(key)) {
           this.originallyExisted.add(key)
         }
+        this._bufferDelete(key, mergeVersion)
       }
 
-      (this as any).localVersion = newLocalVersion;
       (this.root as any).activeTransactions.delete(child)
-
     } else {
-      // Root Logic
       if (child !== this) {
-        // Child → Root 병합: versionIndex/deletedCache 업데이트하되, 전략에는 기록하지 않음
-        // 1. Conflict Detection (Global)
         const modifiedKeys = new Set([...child.writeBuffer.keys(), ...child.deleteBuffer])
         for (const key of modifiedKeys) {
+          // 1. Global Conflict
           const versions = this.versionIndex.get(key)
           if (versions && versions.length > 0) {
             const lastVer = versions[versions.length - 1].version
             if (lastVer > child.snapshotVersion) {
               return {
                 error: `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`,
-                conflict: {
-                  key,
-                  parent: this.read(key) as T,
-                  child: child.read(key) as T,
-                },
+                conflict: { key, parent: this.read(key) as T, child: child.read(key) as T },
               }
+            }
+          }
+          // 2. Local Conflict (Session buffer conflict)
+          const lastModLocalVer = this.keyVersions.get(key)
+          if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
+            return {
+              error: `Commit conflict: Key '${key}' was modified by a newer transaction in the same session (Local v${lastModLocalVer})`,
+              conflict: { key, parent: this.read(key) as T, child: child.read(key) as T },
             }
           }
         }
 
-        const newVersion = this.version + 1
-
-        // 2. Merge child buffers to root buffer with version tracking
+        const mergeVersion = ++this.localVersion
         for (const [key, value] of child.writeBuffer) {
-          // 기존 값 백업 (deletedCache)
-          if (this.writeBuffer.has(key)) {
-            if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
-            this.deletedCache.get(key)!.push({
-              value: this.writeBuffer.get(key)!,
-              deletedAtVersion: newVersion
-            })
-          } else if (this.strategy!.exists(key)) {
-            if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
-            this.deletedCache.get(key)!.push({
-              value: this.strategy!.read(key),
-              deletedAtVersion: newVersion
-            })
-          }
-          this.writeBuffer.set(key, value)
-          this.deleteBuffer.delete(key)
-          if (child.createdKeys.has(key)) {
-            this.createdKeys.add(key)
-          }
-          // versionIndex 업데이트
-          if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
-          this.versionIndex.get(key)!.push({ version: newVersion, exists: true })
-        }
-        for (const key of child.deleteBuffer) {
-          // 기존 값 백업 (deletedCache)
-          if (this.writeBuffer.has(key)) {
-            if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
-            this.deletedCache.get(key)!.push({
-              value: this.writeBuffer.get(key)!,
-              deletedAtVersion: newVersion
-            })
-          } else if (this.strategy!.exists(key)) {
-            if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
-            this.deletedCache.get(key)!.push({
-              value: this.strategy!.read(key),
-              deletedAtVersion: newVersion
-            })
-          }
-          this.deleteBuffer.add(key)
-          this.writeBuffer.delete(key)
-          this.createdKeys.delete(key)
-          const deletedValue = child.deletedValues.get(key)
-          if (deletedValue !== undefined) {
-            this.deletedValues.set(key, deletedValue)
-          }
-          if (child.originallyExisted.has(key)) {
+          const wasCreated = child.createdKeys.has(key)
+          if (child.originallyExisted.has(key) && !this.createdKeys.has(key)) {
             this.originallyExisted.add(key)
           }
-          // versionIndex 업데이트
-          if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
-          this.versionIndex.get(key)!.push({ version: newVersion, exists: false })
+          if (wasCreated) this._bufferCreate(key, value, mergeVersion)
+          else this._bufferWrite(key, value, mergeVersion)
         }
-
-        this.version = newVersion;
+        for (const key of child.deleteBuffer) {
+          const deletedValue = child.deletedValues.get(key)
+          if (deletedValue !== undefined) this.deletedValues.set(key, deletedValue)
+          if (child.originallyExisted.has(key) && !this.createdKeys.has(key)) {
+            this.originallyExisted.add(key)
+          }
+          this._bufferDelete(key, mergeVersion)
+        }
         (this.root as any).activeTransactions.delete(child)
-        this._cleanupDeletedCache()
       } else {
-        // Root 자체 커밋: 버퍼 내용을 전략에 영속화
         const newVersion = this.version + 1
-
-        for (const [key, value] of this.writeBuffer) {
-          this._diskWrite(key, value, newVersion)
-        }
-        for (const key of this.deleteBuffer) {
-          this._diskDelete(key, newVersion)
-        }
-
+        for (const [key, value] of this.writeBuffer) this._diskWrite(key, value, newVersion)
+        for (const key of this.deleteBuffer) this._diskDelete(key, newVersion)
         this.version = newVersion
-
-        // Garbage Collection
         this._cleanupDeletedCache()
       }
     }
-
     return null
   }
-
-  // --- Internal IO Helpers (Root Only) ---
 
   _diskWrite(key: K, value: T, version: number): void {
     const strategy = this.strategy
     if (!strategy) throw new Error('Root Transaction missing strategy')
-    // Backup for MVCC
     if (strategy.exists(key)) {
       const currentVal = strategy.read(key)
       if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
-      this.deletedCache.get(key)!.push({
-        value: currentVal,
-        deletedAtVersion: version
-      })
+      this.deletedCache.get(key)!.push({ value: currentVal, deletedAtVersion: version })
     }
-
     strategy.write(key, value)
     if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
     this.versionIndex.get(key)!.push({ version, exists: true })
@@ -406,22 +283,14 @@ export class SyncMVCCTransaction<
     if (!strategy) throw new Error('Root Transaction missing strategy')
     const versions = this.versionIndex.get(key)
     if (!versions) {
-      // versionIndex에 없으면 writeBuffer 확인 후 전략에서 읽기
-      if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
-      if (this.deleteBuffer.has(key)) return null
       return strategy.exists(key) ? strategy.read(key) : null
     }
 
-    let targetVerObj: { version: number, exists: boolean } | null = null
-    let nextVerObj: { version: number, exists: boolean } | null = null
-
+    let targetVerObj: { version: number; exists: boolean } | null = null
+    let nextVerObj: { version: number; exists: boolean } | null = null
     for (const v of versions) {
-      if (v.version <= snapshotVersion) {
-        targetVerObj = v
-      } else {
-        nextVerObj = v
-        break
-      }
+      if (v.version <= snapshotVersion) targetVerObj = v
+      else { nextVerObj = v; break }
     }
 
     if (!targetVerObj) {
@@ -432,24 +301,18 @@ export class SyncMVCCTransaction<
           if (match) return match.value
         }
       }
-      // versionIndex의 모든 버전이 스냅샷 이후인 경우, 전략에서 확인
-      return strategy.exists(key) ? strategy.read(key) : null
+      return null
     }
-
     if (!targetVerObj.exists) return null
-
     if (!nextVerObj) {
-      // 최신 버전: writeBuffer에 있으면 writeBuffer에서, 아니면 전략에서
       if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
       return strategy.read(key)
     }
-
     const cached = this.deletedCache.get(key)
     if (cached) {
       const match = cached.find(c => c.deletedAtVersion === nextVerObj!.version)
       if (match) return match.value
     }
-
     return null
   }
 
@@ -458,23 +321,26 @@ export class SyncMVCCTransaction<
     if (!strategy) throw new Error('Root Transaction missing strategy')
     const versions = this.versionIndex.get(key)
     if (!versions) {
-      // versionIndex에 없으면 writeBuffer/deleteBuffer 확인 후 전략
-      if (this.writeBuffer.has(key)) return true
-      if (this.deleteBuffer.has(key)) return false
       return strategy.exists(key)
     }
 
-    let targetVerObj: { version: number, exists: boolean } | null = null
-
+    let targetVerObj: { version: number; exists: boolean } | null = null
+    let nextVerObj: { version: number; exists: boolean } | null = null
     for (const v of versions) {
-      if (v.version <= snapshotVersion) {
-        targetVerObj = v
-      } else {
-        break
-      }
+      if (v.version <= snapshotVersion) targetVerObj = v
+      else { nextVerObj = v; break }
     }
 
-    if (!targetVerObj) return strategy.exists(key)
+    if (!targetVerObj) {
+      if (nextVerObj) {
+        const cached = this.deletedCache.get(key)
+        if (cached) {
+          const match = cached.find(c => c.deletedAtVersion === nextVerObj!.version)
+          if (match) return true
+        }
+      }
+      return false
+    }
     return targetVerObj.exists
   }
 
@@ -484,15 +350,10 @@ export class SyncMVCCTransaction<
     if (strategy.exists(key)) {
       const currentVal = strategy.read(key)
       if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
-      this.deletedCache.get(key)!.push({
-        value: currentVal,
-        deletedAtVersion: snapshotVersion
-      })
+      this.deletedCache.get(key)!.push({ value: currentVal, deletedAtVersion: snapshotVersion })
       strategy.delete(key)
     }
-
     if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
     this.versionIndex.get(key)!.push({ version: snapshotVersion, exists: false })
   }
 }
-

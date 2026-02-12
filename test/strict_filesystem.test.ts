@@ -18,9 +18,21 @@ describe('Strict FileSystem MVCC Scenarios', () => {
 
   beforeEach(() => {
     if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true })
+      } catch (e) {
+        // Windows EBUSY retry
+        for (let i = 0; i < 3; i++) {
+          try {
+            const start = Date.now()
+            while (Date.now() - start < 100) { } // Busy wait for 100ms
+            fs.rmSync(tmpDir, { recursive: true, force: true })
+            break
+          } catch (e2) { }
+        }
+      }
     }
-    fs.mkdirSync(tmpDir)
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir)
   })
 
   const getPath = (filename: string) => path.join(tmpDir, filename)
@@ -33,6 +45,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
 
     // Initial State
     root.createNested().create(historyFile, 'Generation 0').commit()
+    root.commit() // Baseline for reader
 
     // Start Long Running Reader
     const reader = root.createNested()
@@ -226,6 +239,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     const file = getPath('repeat.txt')
 
     root.createNested().create(file, 'A').commit()
+    root.commit() // Baseline for observer
 
     const observer = root.createNested()
     expect(observer.read(file)).toBe('A')
@@ -254,6 +268,8 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     const root = new TestSyncMVCCTransaction(new FileStrategy())
     const file = getPath('gc.txt')
     root.createNested().create(file, 'Init').commit()
+    root.commit() // Baseline for GC population
+    root.commit() // Baseline for GC cache population
 
     // Create a reader to HOLD the version
     const holder = root.createNested()
@@ -262,6 +278,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
     // 10 Updates
     for (let i = 0; i < 10; i++) {
       root.createNested().write(file, `Update ${i}`).commit()
+      root.commit() // Population deletedCache
     }
 
     // Should have accumulated versions in index and deletedCache because 'holder' is active
@@ -276,6 +293,7 @@ describe('Strict FileSystem MVCC Scenarios', () => {
 
     // Trigger GC
     root.createNested().create(getPath('trigger_gc.txt'), 'Trigger').commit()
+    root.commit() // Trigger physical Garbage Collection
 
     // Now minActiveVersion should be latest. Old versions < minActiveVersion should be purged.
     expect(root.getDeletedCacheSize()).toBe(0)

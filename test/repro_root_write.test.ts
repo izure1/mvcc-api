@@ -45,4 +45,18 @@ describe('Root write to existing strategy key', () => {
     const val = child.read('key1')
     expect(val).toBe(100)
   })
+
+  test('Case 4: root.write after another commit', () => {
+    const strategy = new InMemoryStrategy()
+    strategy.repo = { test: 1 }
+    const root = new SyncMVCCTransaction(strategy)
+
+    // Some other commit
+    root.create('other', 10).commit()
+
+    // Now root.version is 1, snapshotVersion is 1
+    // strategy에 이미 'test' 키가 존재하므로 write가 가능해야 함
+    expect(() => root.write('test', 2)).not.toThrow()
+    expect(root.read('test')).toBe(2)
+  })
 })

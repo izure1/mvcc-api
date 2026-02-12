@@ -18,6 +18,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   protected readonly createdKeys: Set<K> // create()로 생성된 키 추적
   protected readonly deletedValues: Map<K, T> // delete 시 삭제 전 값 저장
   protected readonly originallyExisted: Set<K> // 트랜잭션 시작 시점에 디스크에 존재했던 키 (deleted 결과 필터링용)
+  protected readonly bufferHistory: Map<K, Array<{ value: T | null, exists: boolean, version: number }>> = new Map()
 
   // Nested Transaction Properties
   protected readonly parent?: MVCCTransaction<S, K, T>
@@ -104,28 +105,55 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
 
   // --- Internal buffer manipulation helpers ---
 
-  protected _bufferCreate(key: K, value: T): void {
-    this.localVersion++
+  protected _recordHistory(key: K): void {
+    const existsInWriteBuffer = this.writeBuffer.has(key)
+    const existsInDeleteBuffer = this.deleteBuffer.has(key)
+    const currentVer = this.keyVersions.get(key)
+
+    if (currentVer !== undefined) {
+      if (!this.bufferHistory.has(key)) this.bufferHistory.set(key, [])
+      this.bufferHistory.get(key)!.push({
+        value: existsInWriteBuffer ? this.writeBuffer.get(key)! : (this.deletedValues.get(key) ?? null),
+        exists: existsInWriteBuffer || !existsInDeleteBuffer,
+        version: currentVer
+      })
+    }
+  }
+
+  protected _bufferCreate(key: K, value: T, version?: number): void {
+    if (version === undefined) this.localVersion++
+    const targetVersion = version ?? this.localVersion
+
+    this._recordHistory(key)
+
     this.writeBuffer.set(key, value)
     this.createdKeys.add(key)
     this.deleteBuffer.delete(key)
-    this.originallyExisted.delete(key) // delete 후 create 하면 deleted에서 제외
-    this.keyVersions.set(key, this.localVersion)
+    this.originallyExisted.delete(key)
+    this.keyVersions.set(key, targetVersion)
   }
 
-  protected _bufferWrite(key: K, value: T): void {
-    this.localVersion++
+  protected _bufferWrite(key: K, value: T, version?: number): void {
+    if (version === undefined) this.localVersion++
+    const targetVersion = version ?? this.localVersion
+
+    this._recordHistory(key)
+
     this.writeBuffer.set(key, value)
     this.deleteBuffer.delete(key)
-    this.keyVersions.set(key, this.localVersion)
+    this.keyVersions.set(key, targetVersion)
   }
 
-  protected _bufferDelete(key: K): void {
-    this.localVersion++
+  protected _bufferDelete(key: K, version?: number): void {
+    if (version === undefined) this.localVersion++
+    const targetVersion = version ?? this.localVersion
+
+    this._recordHistory(key)
+
     this.deleteBuffer.add(key)
     this.writeBuffer.delete(key)
     this.createdKeys.delete(key)
-    this.keyVersions.set(key, this.localVersion)
+    this.keyVersions.set(key, targetVersion)
   }
 
   /**

@@ -32,6 +32,7 @@ describe('FileSystem MVCC', () => {
     const file1 = getPath('file1.txt')
     const tx0 = root.createNested()
     tx0.create(file1, 'Hello World').commit()
+    root.commit() // Persist to strategy
 
     expect(fs.readFileSync(file1, 'utf-8')).toBe('Hello World')
 
@@ -57,6 +58,7 @@ describe('FileSystem MVCC', () => {
     const file2 = getPath('file2.txt')
 
     root.createNested().create(file2, 'Initial').commit()
+    root.commit() // Persist to strategy
 
     const tx3 = root.createNested()
     const tx4 = root.createNested()
@@ -88,6 +90,7 @@ describe('FileSystem MVCC', () => {
     expect(tx5.read(file2)).toBe('Version 2')
 
     tx5.commit()
+    root.commit() // Persist to strategy
     expect(fs.readFileSync(file2, 'utf-8')).toBe('Version 2')
   })
 
@@ -95,6 +98,7 @@ describe('FileSystem MVCC', () => {
     const root = new SyncMVCCTransaction(new FileStrategy())
     const file = getPath('readonly.txt')
     root.createNested().create(file, 'v1').commit()
+    root.commit() // Persist to strategy
 
     const txRead = root.createNested()
     const txWrite = root.createNested()
@@ -117,6 +121,7 @@ describe('FileSystem MVCC', () => {
     const root = new SyncMVCCTransaction(new FileStrategy())
     const file = getPath('conflict.txt')
     root.createNested().create(file, 'start').commit()
+    root.commit() // Persist to strategy
 
     const tx1 = root.createNested()
     const tx2 = root.createNested()
@@ -136,6 +141,7 @@ describe('FileSystem MVCC', () => {
     const file3 = getPath('file3.txt')
     const root1 = new SyncMVCCTransaction(new FileStrategy())
     root1.createNested().create(file3, 'Persistent Data').commit()
+    root1.commit() // Persist to strategy
 
     // New Root instance should see data
     const root2 = new SyncMVCCTransaction(new FileStrategy())
@@ -156,6 +162,7 @@ describe('FileSystem MVCC', () => {
     tx1.create(file, 'test value')
     expect(tx1.exists(file)).toBe(true)
     tx1.commit()
+    root.commit() // Persist to strategy
 
     // 3. 커밋 후 디스크에서 존재
     const tx2 = root.createNested()

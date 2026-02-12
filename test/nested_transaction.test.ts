@@ -56,9 +56,9 @@ describe('Nested Transactions', () => {
 
     const child = parent.createNested()
 
-    // 자식은 부모의 미커밋 버퍼를 볼 수 없음 - 커밋된 값만 봄
-    expect(child.read('k1')).toBe('committed_v1') // 부모가 변경했지만 커밋 안 함
-    expect(child.read('k2')).toBeNull() // 존재하지 않음 (커밋 안 됨)
+    // 자식은 생성 시점의 부모 버퍼 변경사항을 볼 수 있음
+    expect(child.read('k1')).toBe('uncommitted_v2') // 부모의 당시 uncommitted 값
+    expect(child.read('k2')).toBe('uncommitted_new') // 부모의 당시 uncommitted 신규 키
 
     // 자식 자신이 쓴 값은 볼 수 있음
     child.create('k3', 'child_val')
@@ -136,9 +136,9 @@ describe('Nested Transactions', () => {
     l1.create('l1', 'val')
 
     const l2 = l1.createNested()
-    // l2는 l1의 미커밋 버퍼를 볼 수 없음 - 커밋된 root 데이터만 봄
+    // l2는 생성 시점의 l1 버퍼를 볼 수 있음
     expect(l2.read('root')).toBe('val')
-    expect(l2.read('l1')).toBeNull() // l1은 아직 커밋 안 함
+    expect(l2.read('l1')).toBe('val') // l1이 생성 시점에 이미 씀
 
     l2.create('l2', 'val')
 
@@ -197,13 +197,13 @@ describe('Strict Snapshot Isolation Tests', () => {
 
     const child = parent.createNested()
 
-    // 자식은 커밋된 값만 볼 수 있음
-    expect(child.read('k1')).toBe('committed_v1')
-    expect(child.read('k2')).toBeNull()
+    // 자식은 생성 시점의 부모 버퍼를 봄
+    expect(child.read('k1')).toBe('uncommitted_v2')
+    expect(child.read('k2')).toBe('uncommitted_new')
 
-    // 부모의 이후 변경도 자식에게 영향 없음
+    // 부모의 생성 이후 변경은 자식에게 영향 없음 (Snapshot Isolation)
     parent.write('k1', 'uncommitted_v3')
-    expect(child.read('k1')).toBe('committed_v1')
+    expect(child.read('k1')).toBe('uncommitted_v2')
   })
 
   // 자식 생성 이후 다른 트랜잭션이 커밋해도 자식은 스냅샷 유지
@@ -283,12 +283,12 @@ describe('Strict Snapshot Isolation Tests', () => {
 
     const l5 = l4.createNested()
 
-    // L5는 커밋된 root_key만 봄 (나머지는 미커밋)
+    // L5는 생성 시점의 모든 조상 버퍼를 봄 (Snapshot captures current state)
     expect(l5.read('root_key')).toBe('root_val')
-    expect(l5.read('l1_key')).toBeNull()
-    expect(l5.read('l2_key')).toBeNull()
-    expect(l5.read('l3_key')).toBeNull()
-    expect(l5.read('l4_key')).toBeNull()
+    expect(l5.read('l1_key')).toBe('l1_val')
+    expect(l5.read('l2_key')).toBe('l2_val')
+    expect(l5.read('l3_key')).toBe('l3_val')
+    expect(l5.read('l4_key')).toBe('l4_val')
   })
 
   // 롤백 후에도 커밋된 스냅샷은 유지됨

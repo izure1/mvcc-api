@@ -18,9 +18,20 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
 
   beforeEach(() => {
     if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true })
+      } catch (e) {
+        for (let i = 0; i < 3; i++) {
+          try {
+            const start = Date.now()
+            while (Date.now() - start < 100) { }
+            fs.rmSync(tmpDir, { recursive: true, force: true })
+            break
+          } catch (e2) { }
+        }
+      }
     }
-    fs.mkdirSync(tmpDir)
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir)
   })
 
   const getPath = (filename: string) => path.join(tmpDir, filename)
@@ -33,6 +44,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const initTx = root.createNested()
     await initTx.create(historyFile, 'Generation 0')
     await initTx.commit()
+    await root.commit() // Baseline for reader
 
     // Start Long Running Reader
     const reader = root.createNested()
@@ -60,6 +72,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const initTx = root.createNested()
     await initTx.create(counterFile, '0')
     await initTx.commit()
+    await root.commit() // Baseline for concurrent writes
 
     // Simulate 50 concurrent transactions
     const txs = Array.from({ length: 50 }, () => root.createNested())
@@ -86,6 +99,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     await initialTx.create(accA, '100')
     await initialTx.create(accB, '0')
     await initialTx.commit()
+    await root.commit() // Baseline for consistency test
 
     // Verification Transaction
     const checkConsistency = async () => {
@@ -156,6 +170,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const initTx = root.createNested()
     await initTx.create(file, 'Initial')
     await initTx.commit()
+    await root.commit() // Baseline for read self write
 
     const tx = root.createNested()
     expect(await tx.read(file)).toBe('Initial')
@@ -184,6 +199,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const initTx = root.createNested()
     await initTx.create(cycleFile, 'V1')
     await initTx.commit()
+    await root.commit() // Baseline for cycle test
 
     const oldReader = root.createNested()
 
@@ -232,6 +248,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const initTx = root.createNested()
     await initTx.create(file, 'A')
     await initTx.commit()
+    await root.commit() // Baseline for observer
 
     const observer = root.createNested()
     expect(await observer.read(file)).toBe('A')
@@ -259,6 +276,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const initTx = root.createNested()
     await initTx.create(file, 'Init')
     await initTx.commit()
+    await root.commit() // Baseline for GC cache population
 
     // Create a reader to HOLD the version
     const holder = root.createNested()
@@ -268,6 +286,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
       const tx = root.createNested()
       await tx.write(file, `Update ${i}`)
       await tx.commit()
+      await root.commit() // Populate deletedCache
     }
 
     expect(root.getDeletedCacheSize()).toBeGreaterThan(0)
@@ -278,6 +297,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const triggerTx = root.createNested()
     await triggerTx.create(getPath('trigger_gc.txt'), 'Trigger')
     await triggerTx.commit()
+    await root.commit() // Trigger physical Garbage Collection
 
     expect(root.getDeletedCacheSize()).toBe(0)
   })
@@ -317,6 +337,7 @@ describe('Strict Async FileSystem MVCC Scenarios', () => {
     const initB = root.createNested()
     await initB.create(fileB, '0')
     await initB.commit()
+    await root.commit() // Baseline for mixed conflict test
 
     // 50 Txs trying to write A, 50 Txs trying to write B.
     // All start at current version.
