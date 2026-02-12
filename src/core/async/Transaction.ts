@@ -78,8 +78,11 @@ export class AsyncMVCCTransaction<
     if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
     if (this.deleteBuffer.has(key)) return null
 
-    // 2. 루트의 스냅샷 읽기를 통해 버퍼 + 디스크에서 읽음
-    return (this.root as any)._diskRead(key, this.snapshotVersion)
+    // 2. 부모 체인을 따라 스냅샷 읽기
+    if (this.parent) {
+      return this.parent._readSnapshot(key, this.snapshotVersion, this.snapshotLocalVersion) as Promise<T | null>
+    }
+    return this._diskRead(key, this.snapshotVersion)
   }
 
   async exists(key: K): Promise<boolean> {
@@ -88,8 +91,11 @@ export class AsyncMVCCTransaction<
     if (this.deleteBuffer.has(key)) return false
     // 2. 쓰기 버퍼에 있으면 존재함
     if (this.writeBuffer.has(key)) return true
-    // 3. 루트의 스냅샷을 통해 버퍼 + 디스크에서 확인
-    return (this.root as any)._diskExists(key, this.snapshotVersion)
+    // 3. 부모 체인을 따라 스냅샷 확인
+    if (this.parent) {
+      return this.parent._existsSnapshot(key, this.snapshotVersion, this.snapshotLocalVersion) as Promise<boolean>
+    }
+    return this._diskExists(key, this.snapshotVersion)
   }
 
   async _existsSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Promise<boolean> {
