@@ -15,7 +15,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   protected readonly snapshotLocalVersion: number
   protected readonly writeBuffer: Map<K, T>
   protected readonly deleteBuffer: Set<K>
-  protected readonly createdKeys: Set<K> // create()로 생성된 키 추적
+  protected readonly createdKeys: Set<K>
   protected readonly deletedValues: Map<K, T> // delete 시 삭제 전 값 저장
   protected readonly originallyExisted: Set<K> // 트랜잭션 시작 시점에 디스크에 존재했던 키 (deleted 결과 필터링용)
   protected readonly bufferHistory: Map<K, Array<{ value: T | null, exists: boolean, version: number }>> = new Map()
@@ -59,6 +59,10 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     }
   }
 
+  /**
+   * Checks if the transaction is a root transaction.
+   * @returns True if the transaction is a root transaction, false otherwise.
+   */
   isRoot(): boolean {
     return !this.parent
   }
@@ -102,8 +106,6 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    * @returns The transaction instance for chaining.
    */
   abstract delete(key: K): Deferred<this>
-
-  // --- Internal buffer manipulation helpers ---
 
   protected _recordHistory(key: K): void {
     const existsInWriteBuffer = this.writeBuffer.has(key)

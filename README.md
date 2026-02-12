@@ -150,12 +150,10 @@ sequenceDiagram
 >
 > ```typescript
 > const tx = root.createNested()
-> try {
->   // ... work ...
->   await tx.commit()
-> } finally {
->   // Ensure rollback is called if commit failed or an error occurred
->   if (!tx.committed) tx.rollback()
+> const res = await tx.commit()
+> if (!res.success) {
+>   console.log(res.error)
+>   tx.rollback()
 > }
 > ```
 
