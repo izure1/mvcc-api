@@ -45,7 +45,8 @@ export class AsyncMVCCTransaction<
     if (this.writeBuffer.has(key)) {
       valueToDelete = this.writeBuffer.get(key)!
       wasInWriteBuffer = true
-    } else if (!this.deleteBuffer.has(key)) {
+    }
+    else if (!this.deleteBuffer.has(key)) {
       valueToDelete = await this.read(key)
     }
     if (valueToDelete === null) {
@@ -114,7 +115,8 @@ export class AsyncMVCCTransaction<
 
     if (this.parent) {
       return this.parent._existsSnapshot(key, snapshotVersion, this.snapshotLocalVersion) as Promise<boolean>
-    } else {
+    }
+    else {
       return await this._diskExists(key, snapshotVersion)
     }
   }
@@ -146,7 +148,8 @@ export class AsyncMVCCTransaction<
 
     if (this.parent) {
       return this.parent._readSnapshot(key, snapshotVersion, this.snapshotLocalVersion) as Promise<T | null>
-    } else {
+    }
+    else {
       return await this._diskRead(key, snapshotVersion)
     }
   }
@@ -154,23 +157,56 @@ export class AsyncMVCCTransaction<
   async commit(label?: string): Promise<TransactionResult<K, T>> {
     const { created, updated, deleted } = this.getResultEntries()
     if (this.committed) {
-      return { label, success: false, error: 'Transaction already committed', conflict: undefined, created, updated, deleted }
+      return {
+        label,
+        success: false,
+        error: 'Transaction already committed',
+        conflict: undefined,
+        created,
+        updated,
+        deleted
+      }
     }
     if (this.hasCommittedAncestor()) {
-      return { label, success: false, error: 'Ancestor transaction already committed', conflict: undefined, created, updated, deleted }
+      return {
+        label,
+        success: false,
+        error: 'Ancestor transaction already committed',
+        conflict: undefined,
+        created,
+        updated,
+        deleted
+      }
     }
 
     if (this.parent) {
       const failure = await this.parent._merge(this)
       if (failure) {
-        return { label, success: false, error: failure.error, conflict: failure.conflict, created, updated, deleted }
+        return {
+          label,
+          success: false,
+          error: failure.error,
+          conflict: failure.conflict,
+          created,
+          updated,
+          deleted
+        }
       }
       this.committed = true
-    } else {
+    }
+    else {
       if (this.writeBuffer.size > 0 || this.deleteBuffer.size > 0) {
         const failure = await this._merge(this) as TransactionMergeFailure<K, T> | null
         if (failure) {
-          return { label, success: false, error: failure.error, conflict: failure.conflict, created: [], updated: [], deleted: [] }
+          return {
+            label,
+            success: false,
+            error: failure.error,
+            conflict: failure.conflict,
+            created: [],
+            updated: [],
+            deleted: []
+          }
         }
         this.writeBuffer.clear()
         this.deleteBuffer.clear()
@@ -183,7 +219,13 @@ export class AsyncMVCCTransaction<
         (this as any).snapshotVersion = this.version
       }
     }
-    return { label, success: true, created, updated, deleted }
+    return {
+      label,
+      success: true,
+      created,
+      updated,
+      deleted
+    }
   }
 
   async _merge(child: AsyncMVCCTransaction<S, K, T>): Promise<TransactionMergeFailure<K, T> | null> {
@@ -194,7 +236,11 @@ export class AsyncMVCCTransaction<
           if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
             return {
               error: `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`,
-              conflict: { key, parent: await this.read(key) as T, child: await child.read(key) as T },
+              conflict: {
+                key,
+                parent: await this.read(key) as T,
+                child: await child.read(key) as T
+              },
             }
           }
         }
@@ -203,7 +249,11 @@ export class AsyncMVCCTransaction<
           if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
             return {
               error: `Commit conflict: Key '${key}' was modified by a newer transaction (Local v${lastModLocalVer})`,
-              conflict: { key, parent: await this.read(key) as T, child: await child.read(key) as T },
+              conflict: {
+                key,
+                parent: await this.read(key) as T,
+                child: await child.read(key) as T
+              },
             }
           }
         }
@@ -225,7 +275,8 @@ export class AsyncMVCCTransaction<
 
         (this.root as any).activeTransactions.delete(child)
         return null
-      } else {
+      }
+      else {
         if (child !== this) {
           const modifiedKeys = new Set([...child.writeBuffer.keys(), ...child.deleteBuffer])
           for (const key of modifiedKeys) {
@@ -236,7 +287,11 @@ export class AsyncMVCCTransaction<
               if (lastVer > child.snapshotVersion) {
                 return {
                   error: `Commit conflict: Key '${key}' was modified by a newer transaction (v${lastVer})`,
-                  conflict: { key, parent: await this.read(key) as T, child: await child.read(key) as T },
+                  conflict: {
+                    key,
+                    parent: await this.read(key) as T,
+                    child: await child.read(key) as T
+                  },
                 }
               }
             }
@@ -245,7 +300,11 @@ export class AsyncMVCCTransaction<
             if (lastModLocalVer !== undefined && lastModLocalVer > child.snapshotLocalVersion) {
               return {
                 error: `Commit conflict: Key '${key}' was modified by a newer transaction in the same session (Local v${lastModLocalVer})`,
-                conflict: { key, parent: await this.read(key) as T, child: await child.read(key) as T },
+                conflict: {
+                  key,
+                  parent: await this.read(key) as T,
+                  child: await child.read(key) as T
+                },
               }
             }
           }
@@ -268,7 +327,8 @@ export class AsyncMVCCTransaction<
             this._bufferDelete(key, mergeVersion)
           }
           (this.root as any).activeTransactions.delete(child)
-        } else {
+        }
+        else {
           const newVersion = this.version + 1
           for (const [key, value] of this.writeBuffer) await this._diskWrite(key, value, newVersion)
           for (const key of this.deleteBuffer) await this._diskDelete(key, newVersion)

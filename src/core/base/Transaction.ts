@@ -49,7 +49,8 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
       this.snapshotLocalVersion = parent.localVersion
       this.strategy = undefined
       this.root = parent.root
-    } else {
+    }
+    else {
       if (!strategy) throw new Error('Root Transaction must get Strategy')
       this.strategy = strategy
       this.version = 0
@@ -172,7 +173,8 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     for (const [key, data] of this.writeBuffer.entries()) {
       if (this.createdKeys.has(key)) {
         created.push({ key, data })
-      } else {
+      }
+      else {
         updated.push({ key, data })
       }
     }
@@ -184,7 +186,11 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
         deleted.push({ key, data })
       }
     }
-    return { created, updated, deleted }
+    return {
+      created,
+      updated,
+      deleted
+    }
   }
 
   /**
@@ -207,7 +213,12 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
       (this.root as any).activeTransactions.delete(this)
     }
 
-    return { success: true, created, updated, deleted }
+    return {
+      success: true,
+      created,
+      updated,
+      deleted
+    }
   }
 
   /**
@@ -286,7 +297,8 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
         const remaining = cachedList.filter(item => item.deletedAtVersion > minActiveVersion)
         if (remaining.length === 0) {
           this.deletedCache.delete(key)
-        } else {
+        }
+        else {
           this.deletedCache.set(key, remaining)
         }
       }
@@ -306,7 +318,8 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
         if (latestInSnapshotIdx === versions.length - 1) {
           // 모든 버전이 커버됨 → 맵에서 키 자체 삭제
           this.versionIndex.delete(key)
-        } else if (latestInSnapshotIdx > 0) {
+        }
+        else if (latestInSnapshotIdx > 0) {
           versions.splice(0, latestInSnapshotIdx)
         }
       }
