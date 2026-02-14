@@ -50,7 +50,7 @@ export class SyncMVCCTransaction<
   createNested(): this {
     if (this.committed) throw new Error('Transaction already committed')
     const childVersion = this.isRoot() ? this.version : this.snapshotVersion
-    const child = new SyncMVCCTransaction(undefined, this, childVersion) as this
+    const child = new SyncMVCCTransaction(undefined, undefined, this, childVersion) as this
     (this.root as any).activeTransactions.add(child)
     return child
   }
@@ -329,9 +329,16 @@ export class SyncMVCCTransaction<
     const strategy = this.strategy
     if (!strategy) throw new Error('Root Transaction missing strategy')
     if (strategy.exists(key)) {
-      const currentVal = strategy.read(key)
+      // Use cache for current value if available
+      const rootAsAny = this.root as any
+      const currentVal = rootAsAny.diskCache.has(key) ? rootAsAny.diskCache.get(key)! : strategy.read(key)
       if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
       this.deletedCache.get(key)!.push({ value: currentVal, deletedAtVersion: version })
+      // Update cache with new value
+      rootAsAny.diskCache.set(key, value)
+    }
+    else {
+      (this.root as any).diskCache.set(key, value)
     }
     strategy.write(key, value)
     if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
@@ -343,7 +350,13 @@ export class SyncMVCCTransaction<
     if (!strategy) throw new Error('Root Transaction missing strategy')
     const versions = this.versionIndex.get(key)
     if (!versions) {
-      return strategy.exists(key) ? strategy.read(key) : null
+      if ((this.root as any).diskCache.has(key)) return (this.root as any).diskCache.get(key)!
+      if (strategy.exists(key)) {
+        const val = strategy.read(key);
+        (this.root as any).diskCache.set(key, val)
+        return val
+      }
+      return null
     }
 
     let targetVerObj: { version: number; exists: boolean } | null = null
@@ -366,7 +379,10 @@ export class SyncMVCCTransaction<
     if (!targetVerObj.exists) return null
     if (!nextVerObj) {
       if (this.writeBuffer.has(key)) return this.writeBuffer.get(key)!
-      return strategy.read(key)
+      if ((this.root as any).diskCache.has(key)) return (this.root as any).diskCache.get(key)!
+      const val = strategy.read(key);
+      (this.root as any).diskCache.set(key, val)
+      return val
     }
     const cached = this.deletedCache.get(key)
     if (cached) {
@@ -408,10 +424,12 @@ export class SyncMVCCTransaction<
     const strategy = this.strategy
     if (!strategy) throw new Error('Root Transaction missing strategy')
     if (strategy.exists(key)) {
-      const currentVal = strategy.read(key)
+      const rootAsAny = this.root as any
+      const currentVal = rootAsAny.diskCache.has(key) ? rootAsAny.diskCache.get(key)! : strategy.read(key)
       if (!this.deletedCache.has(key)) this.deletedCache.set(key, [])
       this.deletedCache.get(key)!.push({ value: currentVal, deletedAtVersion: snapshotVersion })
       strategy.delete(key)
+      rootAsAny.diskCache.delete(key)
     }
     if (!this.versionIndex.has(key)) this.versionIndex.set(key, [])
     this.versionIndex.get(key)!.push({ version: snapshotVersion, exists: false })

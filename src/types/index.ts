@@ -36,3 +36,15 @@ export type TransactionResult<K, T> = {
   updated: TransactionEntry<K, T>[]
   deleted: TransactionEntry<K, T>[]
 }
+
+/**
+ * Options for MVCC Transaction.
+ */
+export type MVCCOptions = {
+  /**
+   * Capacity of the disk read cache.
+   * Only used by the Root Transaction.
+   * @default 1000
+   */
+  cacheCapacity?: number
+}

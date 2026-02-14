@@ -1,5 +1,6 @@
-import type { Deferred, TransactionResult, TransactionEntry, TransactionMergeFailure } from '../../types'
+import type { Deferred, TransactionResult, TransactionEntry, TransactionMergeFailure, MVCCOptions } from '../../types'
 import type { MVCCStrategy } from './Strategy'
+import { LRUMap } from '../../utils/LRUMap'
 
 /**
  * MVCC Transaction abstract class.
@@ -32,8 +33,9 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   protected versionIndex: Map<K, Array<{ version: number, exists: boolean }>> = new Map()
   protected deletedCache: Map<K, Array<{ value: T, deletedAtVersion: number }>> = new Map()
   protected activeTransactions: Set<MVCCTransaction<S, K, T>> = new Set()
+  protected readonly diskCache: LRUMap<K, T>
 
-  constructor(strategy?: S, parent?: MVCCTransaction<S, K, T>, snapshotVersion?: number) {
+  constructor(strategy?: S, options?: MVCCOptions, parent?: MVCCTransaction<S, K, T>, snapshotVersion?: number) {
     this.snapshotVersion = snapshotVersion ?? 0
     this.writeBuffer = new Map()
     this.deleteBuffer = new Set()
@@ -49,6 +51,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
       this.snapshotLocalVersion = parent.localVersion
       this.strategy = undefined
       this.root = parent.root
+      this.diskCache = parent.diskCache
     }
     else {
       if (!strategy) throw new Error('Root Transaction must get Strategy')
@@ -57,6 +60,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
       this.localVersion = 0
       this.snapshotLocalVersion = 0
       this.root = this
+      this.diskCache = new LRUMap(options?.cacheCapacity ?? 1000)
     }
   }
 
