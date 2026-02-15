@@ -33,7 +33,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   protected versionIndex: Map<K, Array<{ version: number, exists: boolean }>> = new Map()
   protected deletedCache: Map<K, Array<{ value: T, deletedAtVersion: number }>> = new Map()
   protected activeTransactions: Set<MVCCTransaction<S, K, T>> = new Set()
-  protected readonly diskCache: LRUMap<K, T>
+  protected readonly diskCache: LRUMap<K, T | null>
 
   constructor(strategy?: S, options?: MVCCOptions, parent?: MVCCTransaction<S, K, T>, snapshotVersion?: number) {
     this.snapshotVersion = snapshotVersion ?? 0
@@ -60,7 +60,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
       this.localVersion = 0
       this.snapshotLocalVersion = 0
       this.root = this
-      this.diskCache = new LRUMap(options?.cacheCapacity ?? 1000)
+      this.diskCache = new LRUMap<K, T | null>(options?.cacheCapacity ?? 1000)
     }
   }
 
@@ -84,6 +84,24 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
       current = current.parent
     }
     return false
+  }
+
+  /**
+   * Checks if a key was written in this transaction.
+   * @param key The key to check.
+   * @returns True if the key was written in this transaction, false otherwise.
+   */
+  isWrote(key: K): boolean {
+    return this.writeBuffer.has(key)
+  }
+
+  /**
+   * Checks if a key was deleted in this transaction.
+   * @param key The key to check.
+   * @returns True if the key was deleted in this transaction, false otherwise.
+   */
+  isDeleted(key: K): boolean {
+    return this.deleteBuffer.has(key)
   }
 
   /**

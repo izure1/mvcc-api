@@ -4,6 +4,7 @@ import { SyncMVCCStrategy } from '../src/core/sync/Strategy'
 class MockStrategy extends SyncMVCCStrategy<string, string> {
   private data = new Map<string, string>()
   readCount = 0
+  existsCount = 0
 
   read(key: string): string {
     this.readCount++
@@ -16,6 +17,7 @@ class MockStrategy extends SyncMVCCStrategy<string, string> {
     this.data.delete(key)
   }
   exists(key: string): boolean {
+    this.existsCount++
     return this.data.has(key)
   }
 }
@@ -104,6 +106,43 @@ describe('LRU Cache Capacity Test', () => {
     // 3. Read should return null (MVCC standard)
     const val = root.read('delete_key')
     expect(val).toBeNull()
+  })
+
+  test('should use cache for exists() to avoid strategy calls', () => {
+    const strategy = new MockStrategy()
+    strategy.write('exists_key', 'val')
+    const root = new SyncMVCCTransaction(strategy)
+
+    // 1. First read to populate cache
+    root.read('exists_key')
+    expect(strategy.readCount).toBe(1)
+    expect(strategy.existsCount).toBe(1)
+
+    // 2. Clear counts
+    strategy.readCount = 0
+    strategy.existsCount = 0
+
+    // 3. exists() call -> Should hit cache
+    const exists = root.exists('exists_key')
+    expect(exists).toBe(true)
+    expect(strategy.existsCount).toBe(0) // No disk IO
+  })
+
+  test('should negative cache non-existent keys', () => {
+    const strategy = new MockStrategy()
+    const root = new SyncMVCCTransaction(strategy)
+
+    // 1. Read non-existent key
+    strategy.readCount = 0
+    strategy.existsCount = 0
+    const val = root.read('non_existent')
+    expect(val).toBeNull()
+    expect(strategy.existsCount).toBe(1)
+
+    // 2. Read again -> Should HIT negative cache
+    const val2 = root.read('non_existent')
+    expect(val2).toBeNull()
+    expect(strategy.existsCount).toBe(1) // Still 1
   })
 
   test('should use default capacity 1000 if not specified', () => {
