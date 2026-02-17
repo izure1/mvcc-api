@@ -145,6 +145,48 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
     }
   }
 
+  /**
+   * BINARY SEARCH HELPER: Finds the index of the last element in the array 
+   * where item[key] <= target. Assumes the array is sorted by 'key' ascending.
+   */
+  protected _findLastLE<E, P extends keyof E>(array: E[], target: number, property: P): number {
+    let left = 0
+    let right = array.length - 1
+    let result = -1
+
+    while (left <= right) {
+      const mid = (left + right) >> 1
+      if ((array[mid][property] as any) <= target) {
+        result = mid
+        left = mid + 1
+      }
+      else {
+        right = mid - 1
+      }
+    }
+
+    return result
+  }
+
+  /**
+   * BINARY SEARCH HELPER: Finds the index of the element in the array 
+   * where item[key] === target. Assumes the array is sorted by 'key' ascending.
+   */
+  protected _findExact<E, P extends keyof E>(array: E[], target: number, property: P): number {
+    let left = 0
+    let right = array.length - 1
+
+    while (left <= right) {
+      const mid = (left + right) >> 1
+      const val = array[mid][property] as any
+      if (val === target) return mid
+      if (val < target) left = mid + 1
+      else right = mid - 1
+    }
+
+    return -1
+  }
+
   protected _bufferCreate(key: K, value: T, version?: number): void {
     if (version === undefined) this.localVersion++
     const targetVersion = version ?? this.localVersion

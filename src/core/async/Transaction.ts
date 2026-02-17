@@ -106,10 +106,9 @@ export class AsyncMVCCTransaction<
     // 2. 이력 확인 (과거 스냅샷 버전 탐색)
     const history = this.bufferHistory.get(key)
     if (history && snapshotLocalVersion !== undefined) {
-      for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i].version <= snapshotLocalVersion) {
-          return history[i].exists
-        }
+      const idx = this._findLastLE(history, snapshotLocalVersion, 'version')
+      if (idx >= 0) {
+        return history[idx].exists
       }
     }
 
@@ -139,10 +138,9 @@ export class AsyncMVCCTransaction<
     // 2. 이력 확인 (과거 스냅샷 버전 탐색)
     const history = this.bufferHistory.get(key)
     if (history && snapshotLocalVersion !== undefined) {
-      for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i].version <= snapshotLocalVersion) {
-          return history[i].exists ? history[i].value : null
-        }
+      const idx = this._findLastLE(history, snapshotLocalVersion, 'version')
+      if (idx >= 0) {
+        return history[idx].exists ? history[idx].value : null
       }
     }
 
@@ -375,17 +373,16 @@ export class AsyncMVCCTransaction<
 
     let targetVerObj: { version: number; exists: boolean } | null = null
     let nextVerObj: { version: number; exists: boolean } | null = null
-    for (const v of versions) {
-      if (v.version <= snapshotVersion) targetVerObj = v
-      else { nextVerObj = v; break }
-    }
+    const idx = this._findLastLE(versions, snapshotVersion, 'version')
+    if (idx >= 0) targetVerObj = versions[idx]
+    if (idx + 1 < versions.length) nextVerObj = versions[idx + 1]
 
     if (!targetVerObj) {
       if (nextVerObj) {
         const cached = this.deletedCache.get(key)
         if (cached) {
-          const match = cached.find(c => c.deletedAtVersion === nextVerObj!.version)
-          if (match) return match.value
+          const cIdx = this._findExact(cached, nextVerObj.version, 'deletedAtVersion')
+          if (cIdx >= 0) return cached[cIdx].value
         }
       }
       return null
@@ -403,11 +400,12 @@ export class AsyncMVCCTransaction<
     }
     const cached = this.deletedCache.get(key)
     if (cached) {
-      const match = cached.find(c => c.deletedAtVersion === nextVerObj!.version)
-      if (match) return match.value
+      const cIdx = this._findExact(cached, nextVerObj.version, 'deletedAtVersion')
+      if (cIdx >= 0) return cached[cIdx].value
     }
     return null
   }
+
 
   async _diskExists(key: K, snapshotVersion: number): Promise<boolean> {
     const strategy = this.strategy
@@ -423,17 +421,16 @@ export class AsyncMVCCTransaction<
 
     let targetVerObj: { version: number; exists: boolean } | null = null
     let nextVerObj: { version: number; exists: boolean } | null = null
-    for (const v of versions) {
-      if (v.version <= snapshotVersion) targetVerObj = v
-      else { nextVerObj = v; break }
-    }
+    const idx = this._findLastLE(versions, snapshotVersion, 'version')
+    if (idx >= 0) targetVerObj = versions[idx]
+    if (idx + 1 < versions.length) nextVerObj = versions[idx + 1]
 
     if (!targetVerObj) {
       if (nextVerObj) {
         const cached = this.deletedCache.get(key)
         if (cached) {
-          const match = cached.find(c => c.deletedAtVersion === nextVerObj!.version)
-          if (match) return true
+          const cIdx = this._findExact(cached, nextVerObj.version, 'deletedAtVersion')
+          if (cIdx >= 0) return true
         }
       }
       return false
