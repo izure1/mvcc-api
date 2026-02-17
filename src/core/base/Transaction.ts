@@ -286,6 +286,36 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   }
 
   /**
+   * Checks for conflicts among multiple transactions.
+   * A conflict occurs if two or more transactions modify (write or delete) the same key.
+   * @param transactions Array of transactions to check.
+   * @returns An array of keys that are in conflict.
+   */
+  static CheckConflicts<S extends MVCCStrategy<any, any>, K, T>(
+    transactions: MVCCTransaction<S, K, T>[]
+  ): K[] {
+    const modifiedKeys = new Map<K, number>()
+    const conflicts = new Set<K>()
+
+    for (const tx of transactions) {
+      const txModified = new Set<K>([
+        ...tx.writeBuffer.keys(),
+        ...tx.deleteBuffer,
+      ])
+
+      for (const key of txModified) {
+        const count = modifiedKeys.get(key) ?? 0
+        if (count > 0) {
+          conflicts.add(key)
+        }
+        modifiedKeys.set(key, count + 1)
+      }
+    }
+
+    return Array.from(conflicts)
+  }
+
+  /**
    * Reads a value respecting the transaction's snapshot and local changes.
    * @param key The key to read.
    * @returns The value, or null if not found.
