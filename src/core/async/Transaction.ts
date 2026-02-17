@@ -89,67 +89,77 @@ export class AsyncMVCCTransaction<
   }
 
   async _existsSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Promise<boolean> {
-    // 1. 버퍼 직접 확인 (스냅샷 시점 이전에 존재한 것이면 모두 허용)
-    if (this.writeBuffer.has(key)) {
-      const keyModVersion = this.keyVersions.get(key)!
-      if (snapshotLocalVersion === undefined || keyModVersion <= snapshotLocalVersion) {
-        return true
-      }
-    }
-    if (this.deleteBuffer.has(key)) {
-      const keyModVersion = this.keyVersions.get(key)!
-      if (snapshotLocalVersion === undefined || keyModVersion <= snapshotLocalVersion) {
-        return false
-      }
-    }
+    let current: AsyncMVCCTransaction<S, K, T> | undefined = this
+    let slVer = snapshotLocalVersion
 
-    // 2. 이력 확인 (과거 스냅샷 버전 탐색)
-    const history = this.bufferHistory.get(key)
-    if (history && snapshotLocalVersion !== undefined) {
-      const idx = this._findLastLE(history, snapshotLocalVersion, 'version')
-      if (idx >= 0) {
-        return history[idx].exists
+    while (current) {
+      // 1. 버퍼 직접 확인
+      if (current.writeBuffer.has(key)) {
+        const keyModVersion = current.keyVersions.get(key)!
+        if (slVer === undefined || keyModVersion <= slVer) return true
+      }
+      if (current.deleteBuffer.has(key)) {
+        const keyModVersion = current.keyVersions.get(key)!
+        if (slVer === undefined || keyModVersion <= slVer) return false
+      }
+
+      // 2. 이력 확인
+      const history = current.bufferHistory.get(key)
+      if (history && slVer !== undefined) {
+        const idx = current._findLastLE(history, slVer, 'version')
+        if (idx >= 0) return history[idx].exists
+      }
+
+      // 3. 부모 또는 디스크로 전이
+      if (current.parent) {
+        slVer = current.snapshotLocalVersion
+        current = current.parent as AsyncMVCCTransaction<S, K, T>
+      }
+      else {
+        return await current._diskExists(key, snapshotVersion)
       }
     }
-
-    if (this.parent) {
-      return this.parent._existsSnapshot(key, snapshotVersion, this.snapshotLocalVersion) as Promise<boolean>
-    }
-    else {
-      return await this._diskExists(key, snapshotVersion)
-    }
+    return false // Should not reach here
   }
 
   async _readSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Promise<T | null> {
-    // 1. 버퍼 직접 확인 (스냅샷 시점 이전에 존재한 것이면 모두 허용)
-    if (this.writeBuffer.has(key)) {
-      const keyModVersion = this.keyVersions.get(key)!
-      if (snapshotLocalVersion === undefined || keyModVersion <= snapshotLocalVersion) {
-        return this.writeBuffer.get(key)!
-      }
-    }
-    if (this.deleteBuffer.has(key)) {
-      const keyModVersion = this.keyVersions.get(key)!
-      if (snapshotLocalVersion === undefined || keyModVersion <= snapshotLocalVersion) {
-        return null
-      }
-    }
+    let current: AsyncMVCCTransaction<S, K, T> | undefined = this
+    let slVer = snapshotLocalVersion
 
-    // 2. 이력 확인 (과거 스냅샷 버전 탐색)
-    const history = this.bufferHistory.get(key)
-    if (history && snapshotLocalVersion !== undefined) {
-      const idx = this._findLastLE(history, snapshotLocalVersion, 'version')
-      if (idx >= 0) {
-        return history[idx].exists ? history[idx].value : null
+    while (current) {
+      // 1. 버퍼 직접 확인
+      if (current.writeBuffer.has(key)) {
+        const keyModVersion = current.keyVersions.get(key)!
+        if (slVer === undefined || keyModVersion <= slVer) {
+          return current.writeBuffer.get(key)!
+        }
+      }
+      if (current.deleteBuffer.has(key)) {
+        const keyModVersion = current.keyVersions.get(key)!
+        if (slVer === undefined || keyModVersion <= slVer) {
+          return null
+        }
+      }
+
+      // 2. 이력 확인
+      const history = current.bufferHistory.get(key)
+      if (history && slVer !== undefined) {
+        const idx = current._findLastLE(history, slVer, 'version')
+        if (idx >= 0) {
+          return history[idx].exists ? history[idx].value : null
+        }
+      }
+
+      // 3. 부모 또는 디스크로 전이
+      if (current.parent) {
+        slVer = current.snapshotLocalVersion
+        current = current.parent as AsyncMVCCTransaction<S, K, T>
+      }
+      else {
+        return await current._diskRead(key, snapshotVersion)
       }
     }
-
-    if (this.parent) {
-      return this.parent._readSnapshot(key, snapshotVersion, this.snapshotLocalVersion) as Promise<T | null>
-    }
-    else {
-      return await this._diskRead(key, snapshotVersion)
-    }
+    return null // Should not reach here
   }
 
   async commit(label?: string): Promise<TransactionResult<K, T>> {
