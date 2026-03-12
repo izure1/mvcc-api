@@ -190,6 +190,7 @@ export class AsyncMVCCTransaction<
     if (this.parent) {
       const failure = await this.parent._merge(this)
       if (failure) {
+        this.rollback()
         return {
           label,
           success: false,
@@ -200,12 +201,14 @@ export class AsyncMVCCTransaction<
           deleted
         }
       }
+      this._cleanupAll()
       this.committed = true
     }
     else {
       if (this.writeBuffer.size > 0 || this.deleteBuffer.size > 0) {
         const failure = await this._merge(this) as TransactionMergeFailure<K, T> | null
         if (failure) {
+          this.rollback()
           return {
             label,
             success: false,
@@ -216,13 +219,7 @@ export class AsyncMVCCTransaction<
             deleted: []
           }
         }
-        this.writeBuffer.clear()
-        this.deleteBuffer.clear()
-        this.createdKeys.clear()
-        this.deletedValues.clear()
-        this.originallyExisted.clear()
-        this.keyVersions.clear()
-        this.bufferHistory.clear()
+        this._cleanupAll()
         this.localVersion = 0;
         (this as any).snapshotVersion = this.version
       }

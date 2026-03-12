@@ -265,11 +265,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   rollback(): TransactionResult<K, T> {
     const { created, updated, deleted } = this.getResultEntries()
 
-    this.writeBuffer.clear()
-    this.deleteBuffer.clear()
-    this.createdKeys.clear()
-    this.deletedValues.clear()
-    this.originallyExisted.clear()
+    this._cleanupAll()
     this.committed = true
 
     // Deregister from Root's active transactions for GC
@@ -368,6 +364,20 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
    * @param snapshotLocalVersion The local version within the parent's buffer to check at.
    */
   abstract _existsSnapshot(key: K, snapshotVersion: number, snapshotLocalVersion?: number): Deferred<boolean>
+
+  /**
+   * Cleans up all buffers and history.
+   * This method is called by the commit method.
+   */
+  protected _cleanupAll(): void {
+    this.writeBuffer.clear()
+    this.deleteBuffer.clear()
+    this.createdKeys.clear()
+    this.deletedValues.clear()
+    this.originallyExisted.clear()
+    this.keyVersions.clear()
+    this.bufferHistory.clear()
+  }
 
   /**
    * Cleans up both deletedCache and versionIndex based on minActiveVersion.
