@@ -148,13 +148,14 @@ sequenceDiagram
 > Internally, the Root transaction tracks all active transactions to determine which old versions can be safely pruned from memory.
 > Failing to close a transaction will prevent the internal Garbage Collection (Pruning) from reclaiming memory, eventually leading to a **Memory Leak**.
 >
+> Note: If `commit()` fails due to a conflict or error, the transaction is **automatically rolled back**. You do not need to call `rollback()` manually after a failed `commit()`.
+>
 > ```typescript
 > const tx = root.createNested()
+> // either
 > const res = await tx.commit()
-> if (!res.success) {
->   console.log(res.error)
->   tx.rollback()
-> }
+> // or
+> tx.rollback()
 > ```
 
 ## Conflict Detection
@@ -172,6 +173,7 @@ const result = child.commit('It should fail')
 if (!result.success) {
   console.log(result.label) // "It should fail"
   console.log(result.error) // "Commit conflict: Key 'shared' was modified..."
+  // Note: child is automatically rolled back here, discarding its uncommitted changes.
 }
 ```
 
