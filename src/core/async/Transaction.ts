@@ -64,7 +64,9 @@ export class AsyncMVCCTransaction<
     if (this.committed) throw new Error('Transaction already committed')
     const childVersion = this.isRoot() ? this.version : this.snapshotVersion
     const child = new AsyncMVCCTransaction(undefined, undefined, this, childVersion) as this
-    (this.root as any).activeTransactions.add(child)
+    this._updateActiveDescendantCount(1)
+    const rootAny = this.root as any
+    rootAny.activeTransactions.add(child)
     return child
   }
 
@@ -202,6 +204,7 @@ export class AsyncMVCCTransaction<
         }
       }
       this._cleanupAll()
+      this.parent._updateActiveDescendantCount(-1)
       this.committed = true
     }
     else {

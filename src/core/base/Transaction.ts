@@ -22,6 +22,7 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   protected readonly bufferHistory: Map<K, Array<{ value: T | null, exists: boolean, version: number }>> = new Map()
 
   // Nested Transaction Properties
+  public activeDescendantCount: number = 0
   protected readonly parent?: MVCCTransaction<S, K, T>
   public localVersion: number // Local version for Nested Conflict Detection
   protected readonly keyVersions: Map<K, number> // Key -> Local Version (When it was modified locally)
@@ -131,6 +132,8 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
   abstract delete(key: K): Deferred<this>
 
   protected _recordHistory(key: K): void {
+    if (this.activeDescendantCount === 0) return
+
     const existsInWriteBuffer = this.writeBuffer.has(key)
     const existsInDeleteBuffer = this.deleteBuffer.has(key)
     const currentVer = this.keyVersions.get(key)
@@ -270,6 +273,9 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
 
     // Deregister from Root's active transactions for GC
     if (this.root !== this) {
+      if (this.parent) {
+        this.parent._updateActiveDescendantCount(-1)
+      }
       (this.root as any).activeTransactions.delete(this)
     }
 
@@ -427,6 +433,17 @@ export abstract class MVCCTransaction<S extends MVCCStrategy<K, T>, K, T> {
           versions.splice(0, latestInSnapshotIdx)
         }
       }
+    }
+  }
+
+  /**
+   * Updates the descendant count for this transaction and its ancestors.
+   * @param delta The amount to change the count by.
+   */
+  public _updateActiveDescendantCount(delta: number): void {
+    this.activeDescendantCount += delta
+    if (this.parent) {
+      this.parent._updateActiveDescendantCount(delta)
     }
   }
 }
